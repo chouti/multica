@@ -93,10 +93,9 @@ func TestListTimeline_ReturnsAllEntriesAscending(t *testing.T) {
 	if status != http.StatusOK {
 		t.Fatalf("status = %d, want 200", status)
 	}
-	// Issue creation seeds an "issue created" activity, so we expect
-	// (1 issue-created activity) + 5 seeded comments. The seeded comments
-	// are timestamped strictly after the auto-activity, so the comment
-	// order alone is what we assert.
+	// Handler tests don't register the activity listener (that lives in
+	// cmd/server), so issue creation does not seed an auto-activity here.
+	// We assert directly on the seeded comments.
 	commentEntries := []TimelineEntry{}
 	for _, e := range entries {
 		if e.Type == "comment" {
@@ -128,9 +127,10 @@ func TestListTimeline_MergesCommentsAndActivities(t *testing.T) {
 				i, entries[i-1].CreatedAt, entries[i].CreatedAt)
 		}
 	}
-	// At least: 1 auto issue-created activity + 3 comments + 2 activities = 6.
-	if len(entries) < 6 {
-		t.Fatalf("entries = %d, want at least 6", len(entries))
+	// 3 seeded comments + 2 seeded activities = 5. Handler tests don't
+	// register the activity listener, so there is no auto issue-created row.
+	if got, want := len(entries), 5; got != want {
+		t.Fatalf("entries = %d, want %d", got, want)
 	}
 }
 
@@ -213,10 +213,9 @@ func TestListTimeline_EmptyIssue(t *testing.T) {
 	if status != http.StatusOK {
 		t.Fatalf("status = %d, want 200", status)
 	}
-	// Issue creation seeds one "issue created" activity; no comments.
-	for _, e := range entries {
-		if e.Type == "comment" {
-			t.Errorf("unexpected comment entry: %+v", e)
-		}
+	// Handler tests don't wire the activity listener, so a freshly-created
+	// issue with no comments has an empty timeline.
+	if got := len(entries); got != 0 {
+		t.Fatalf("entries = %d, want 0", got)
 	}
 }
