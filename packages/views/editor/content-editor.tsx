@@ -211,6 +211,46 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       };
     }, []);
 
+    // Sync external `defaultValue` changes into the editor.
+    //
+    // Tiptap's `useEditor` reads `content` only at mount; later prop updates
+    // are silently ignored ([ueberdosis/tiptap#5831]). When a WS event or
+    // another client updates `issue.description`, the TanStack Query cache
+    // produces a new prop here — without this effect the editor keeps showing
+    // stale content until the consumer remounts (`key={id}` only fires on
+    // issue switch, not on same-issue updates).
+    //
+    // Guards (in order):
+    //   1. Skip when the editor is focused — the user is typing locally and
+    //      clobbering their input would lose the caret + in-flight characters.
+    //   2. Skip when the incoming markdown matches what the editor already
+    //      holds — avoids a no-op transaction when the cache reflects a write
+    //      this same editor just emitted via `onUpdate`.
+    //   3. Pass `emitUpdate: false` so the synced write does not re-trigger
+    //      `onUpdate` → `onUpdateRef` → server save (self-write loop).
+    useEffect(() => {
+      if (!editor || editor.isDestroyed) return;
+      if (editor.isFocused) return;
+
+      const incoming = defaultValue ? preprocessMarkdown(defaultValue) : "";
+      const current = stripBlobUrls(editor.getMarkdown()).trimEnd();
+      const incomingNormalized = stripBlobUrls(incoming).trimEnd();
+      if (incomingNormalized === current) return;
+
+      const { from, to } = editor.state.selection;
+      editor.commands.setContent(incoming, {
+        emitUpdate: false,
+        contentType: "markdown",
+      });
+
+      const docSize = editor.state.doc.content.size;
+      const clampedFrom = Math.min(from, docSize);
+      const clampedTo = Math.min(to, docSize);
+      editor.commands.setTextSelection({ from: clampedFrom, to: clampedTo });
+
+      lastEmittedRef.current = stripBlobUrls(editor.getMarkdown()).trimEnd();
+    }, [defaultValue, editor]);
+
     useImperativeHandle(ref, () => ({
       getMarkdown: () => stripBlobUrls(editor?.getMarkdown() ?? ""),
       clearContent: () => {
