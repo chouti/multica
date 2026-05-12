@@ -8,6 +8,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -450,9 +451,15 @@ func (h *Handler) ListChatMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	messageIDs := make([]pgtype.UUID, len(messages))
+	for i, m := range messages {
+		messageIDs[i] = m.ID
+	}
+	groupedAtt := h.groupChatMessageAttachments(r.Context(), workspaceID, messageIDs)
+
 	resp := make([]ChatMessageResponse, len(messages))
 	for i, m := range messages {
-		resp[i] = chatMessageToResponse(m)
+		resp[i] = chatMessageToResponse(m, groupedAtt[uuidToString(m.ID)])
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -694,6 +701,12 @@ type ChatMessageResponse struct {
 	// ElapsedMs is the wall-clock duration from task creation to terminal
 	// state. Drives "Replied in 38s" / "Failed after 12s" captions.
 	ElapsedMs *int64 `json:"elapsed_ms"`
+	// Attachments linked to this message via chat_message_id. The chat
+	// bubble renders file cards from these, and the daemon claim path
+	// (daemon.go) pulls structured metadata from the same source so the
+	// agent can `multica attachment download <id>` rather than guessing
+	// from a markdown URL that may expire.
+	Attachments []AttachmentResponse `json:"attachments,omitempty"`
 }
 
 func chatSessionToResponse(s db.ChatSession) ChatSessionResponse {
@@ -709,7 +722,7 @@ func chatSessionToResponse(s db.ChatSession) ChatSessionResponse {
 	}
 }
 
-func chatMessageToResponse(m db.ChatMessage) ChatMessageResponse {
+func chatMessageToResponse(m db.ChatMessage, attachments []AttachmentResponse) ChatMessageResponse {
 	return ChatMessageResponse{
 		ID:            uuidToString(m.ID),
 		ChatSessionID: uuidToString(m.ChatSessionID),
@@ -719,5 +732,6 @@ func chatMessageToResponse(m db.ChatMessage) ChatMessageResponse {
 		CreatedAt:     timestampToString(m.CreatedAt),
 		FailureReason: textToPtr(m.FailureReason),
 		ElapsedMs:     int8ToPtr(m.ElapsedMs),
+		Attachments:   attachments,
 	}
 }

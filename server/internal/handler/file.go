@@ -107,6 +107,30 @@ func (h *Handler) groupAttachments(r *http.Request, commentIDs []pgtype.UUID) ma
 	return grouped
 }
 
+// groupChatMessageAttachments loads attachments for multiple chat messages
+// and groups them by chat_message_id. Mirrors groupAttachments — used so the
+// chat message list can surface attachment metadata to the UI bubble (file
+// cards, click-through download) without an N+1 query per message.
+func (h *Handler) groupChatMessageAttachments(ctx context.Context, workspaceID string, messageIDs []pgtype.UUID) map[string][]AttachmentResponse {
+	if len(messageIDs) == 0 {
+		return nil
+	}
+	attachments, err := h.Queries.ListAttachmentsByChatMessageIDs(ctx, db.ListAttachmentsByChatMessageIDsParams{
+		Column1:     messageIDs,
+		WorkspaceID: parseUUID(workspaceID),
+	})
+	if err != nil {
+		slog.Error("failed to load attachments for chat messages", "error", err)
+		return nil
+	}
+	grouped := make(map[string][]AttachmentResponse, len(messageIDs))
+	for _, a := range attachments {
+		mid := uuidToString(a.ChatMessageID)
+		grouped[mid] = append(grouped[mid], h.attachmentToResponse(a))
+	}
+	return grouped
+}
+
 // ---------------------------------------------------------------------------
 // UploadFile — POST /api/upload-file
 // ---------------------------------------------------------------------------

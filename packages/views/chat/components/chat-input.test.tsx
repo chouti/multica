@@ -33,6 +33,7 @@ vi.mock("../../editor", () => ({
     ref: React.Ref<unknown>,
   ) {
     const valueRef = useRef<string>(defaultValue ?? "");
+    const uploadingRef = useRef(0);
     useImperativeHandle(ref, () => ({
       getMarkdown: () => valueRef.current,
       clearContent: () => {
@@ -41,12 +42,18 @@ vi.mock("../../editor", () => ({
       blur: () => {},
       focus: () => {},
       uploadFile: async (file: File) => {
-        const result = await onUploadFile?.(file);
-        if (result) {
-          valueRef.current = `${valueRef.current}![](${result.link})`.trim();
-          onUpdate?.(valueRef.current);
+        uploadingRef.current += 1;
+        try {
+          const result = await onUploadFile?.(file);
+          if (result) {
+            valueRef.current = `${valueRef.current}![](${result.link})`.trim();
+            onUpdate?.(valueRef.current);
+          }
+        } finally {
+          uploadingRef.current = Math.max(0, uploadingRef.current - 1);
         }
       },
+      hasActiveUploads: () => uploadingRef.current > 0,
     }));
     return (
       <textarea
@@ -142,6 +149,50 @@ describe("ChatInput attachment wiring", () => {
     expect(onSend).toHaveBeenCalledTimes(1);
     const [, ids] = onSend.mock.calls[0]!;
     expect(ids).toEqual(["att-42"]);
+  });
+
+  it("disables send while an upload is in flight, re-enables after it resolves", async () => {
+    let resolveUpload: (v: { id: string; link: string; filename: string }) => void;
+    const uploadPromise = new Promise<{ id: string; link: string; filename: string }>((res) => {
+      resolveUpload = res;
+    });
+    const onSend = vi.fn();
+    const onUploadFile = vi.fn(() => uploadPromise);
+    renderInput({ onSend, onUploadFile });
+
+    // Give the editor some text so isEmpty=false — this isolates the
+    // disabled state to the pending-upload condition (otherwise both
+    // checks would fire and the test couldn't tell them apart).
+    fireEvent.change(screen.getByTestId("editor"), { target: { value: "preview text" } });
+
+    const file = new File(["x"], "slow.png", { type: "image/png" });
+    dropHandlers.onDrop?.([file]);
+
+    // While the upload is pending the SubmitButton must be disabled.
+    // Bypassing this would send the message with the attachment id
+    // missing from the body.
+    await waitFor(() => {
+      const buttons = screen.getAllByRole("button");
+      const sendButton = buttons[buttons.length - 1]!;
+      expect(sendButton).toBeDisabled();
+    });
+
+    resolveUpload!({
+      id: "att-slow",
+      link: "https://cdn.example/att-slow.png",
+      filename: "slow.png",
+    });
+
+    let sendButton: HTMLElement;
+    await waitFor(() => {
+      const buttons = screen.getAllByRole("button");
+      sendButton = buttons[buttons.length - 1]!;
+      expect(sendButton).not.toBeDisabled();
+    });
+    fireEvent.click(sendButton!);
+    expect(onSend).toHaveBeenCalledTimes(1);
+    const [, ids] = onSend.mock.calls[0]!;
+    expect(ids).toEqual(["att-slow"]);
   });
 
   it("does not render the file upload button when onUploadFile is omitted", () => {

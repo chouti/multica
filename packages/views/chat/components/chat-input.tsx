@@ -75,6 +75,13 @@ export function ChatInput({
   const setInputDraft = useChatStore((s) => s.setInputDraft);
   const clearInputDraft = useChatStore((s) => s.clearInputDraft);
   const [isEmpty, setIsEmpty] = useState(!inputDraft.trim());
+  // Number of in-flight uploads. We track this explicitly (rather than
+  // peeking at the editor on every render) so the SubmitButton visibly
+  // disables the instant an upload starts and re-enables the instant it
+  // finishes. handleSend ALSO checks `hasActiveUploads()` for paths that
+  // bypass the button (Mod+Enter while paste is mid-stream, drag-drop
+  // racing the keyboard) — defense in depth.
+  const [pendingUploads, setPendingUploads] = useState(0);
 
   // Maps "CDN URL inserted into the editor" → "attachment row id" so that
   // on send we can ask the server to bind only the attachments still
@@ -85,9 +92,14 @@ export function ChatInput({
   const handleUpload = useCallback(
     async (file: File): Promise<UploadResult | null> => {
       if (!onUploadFile) return null;
-      const result = await onUploadFile(file);
-      if (result) uploadMapRef.current.set(result.link, result.id);
-      return result;
+      setPendingUploads((n) => n + 1);
+      try {
+        const result = await onUploadFile(file);
+        if (result) uploadMapRef.current.set(result.link, result.id);
+        return result;
+      } finally {
+        setPendingUploads((n) => Math.max(0, n - 1));
+      }
     },
     [onUploadFile],
   );
@@ -108,6 +120,17 @@ export function ChatInput({
         disabled,
         noAgent,
       });
+      return;
+    }
+    // Block the send while any file is still uploading. If we let it
+    // through the attachment id is not yet in uploadMapRef (the upload
+    // resolves later) and the attachment would only end up bound to the
+    // session, not the message — the agent then can't `multica attachment
+    // download <id>` the file. The SubmitButton is also disabled in this
+    // state via `uploading`, but Mod+Enter bypasses the button so we
+    // still gate here.
+    if (editorRef.current?.hasActiveUploads()) {
+      logger.debug("input.send skipped: uploads in flight");
       return;
     }
     // Only send attachment IDs for uploads still present in the content.
@@ -215,7 +238,7 @@ export function ChatInput({
           )}
           <SubmitButton
             onClick={handleSend}
-            disabled={isEmpty || !!disabled || !!noAgent}
+            disabled={isEmpty || !!disabled || !!noAgent || pendingUploads > 0}
             running={isRunning}
             onStop={onStop}
             tooltip={`${t(($) => $.input.send_tooltip)} · ${formatShortcut(modKey, enterKey)}`}

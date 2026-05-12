@@ -56,6 +56,11 @@ SELECT * FROM attachment
 WHERE chat_message_id = $1 AND workspace_id = $2
 ORDER BY created_at ASC;
 
+-- name: ListAttachmentsByChatMessageIDs :many
+SELECT * FROM attachment
+WHERE chat_message_id = ANY($1::uuid[]) AND workspace_id = $2
+ORDER BY created_at ASC;
+
 -- name: LinkAttachmentsToIssue :exec
 UPDATE attachment
 SET issue_id = $1

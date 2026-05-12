@@ -8,7 +8,28 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/multica-ai/multica/server/internal/middleware"
+	"github.com/multica-ai/multica/server/internal/util"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
+
+// withChatTestWorkspaceCtx injects the workspace+member context that the
+// real chi middleware chain would normally set. SendChatMessage (and most
+// other chat handlers) read workspace ID from ctxWorkspaceID; without this
+// the test harness, which calls handlers directly, gets "invalid workspace
+// id" on the parseUUIDOrBadRequest call inside SendChatMessage.
+func withChatTestWorkspaceCtx(t *testing.T, req *http.Request) *http.Request {
+	t.Helper()
+	memberRow, err := testHandler.Queries.GetMemberByUserAndWorkspace(context.Background(), db.GetMemberByUserAndWorkspaceParams{
+		UserID:      util.MustParseUUID(testUserID),
+		WorkspaceID: util.MustParseUUID(testWorkspaceID),
+	})
+	if err != nil {
+		t.Fatalf("load test member row: %v", err)
+	}
+	return req.WithContext(middleware.SetMemberContext(req.Context(), testWorkspaceID, memberRow))
+}
 
 // TestSendChatMessage_LinksAttachments verifies that attachments uploaded
 // against a chat_session (chat_message_id NULL) are back-filled with the
@@ -54,6 +75,7 @@ func TestSendChatMessage_LinksAttachments(t *testing.T) {
 		"attachment_ids": []string{attachmentID},
 	})
 	sendReq = withURLParam(sendReq, "sessionId", sessionID)
+	sendReq = withChatTestWorkspaceCtx(t, sendReq)
 	sendW := httptest.NewRecorder()
 	testHandler.SendChatMessage(sendW, sendReq)
 	if sendW.Code != http.StatusCreated {
@@ -96,6 +118,7 @@ func TestSendChatMessage_InvalidAttachmentIDs(t *testing.T) {
 		"attachment_ids": []string{"not-a-uuid"},
 	})
 	req = withURLParam(req, "sessionId", sessionID)
+	req = withChatTestWorkspaceCtx(t, req)
 	w := httptest.NewRecorder()
 	testHandler.SendChatMessage(w, req)
 	if w.Code != http.StatusBadRequest {
