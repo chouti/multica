@@ -47,7 +47,7 @@ import { STATUS_CONFIG, PRIORITY_CONFIG } from "@multica/core/issues/config";
 import { formatDateOnly } from "@multica/core/issues/date";
 import { useUpdateIssue } from "@multica/core/issues/mutations";
 import { toast } from "sonner";
-import { StatusIcon, PriorityIcon, StatusPicker, PriorityPicker, StartDatePicker, DueDatePicker, AssigneePicker, LabelPicker } from ".";
+import { StatusIcon, PriorityIcon, StatusPicker, PriorityPicker, StartDatePicker, DueDatePicker, AssigneePicker, LabelPicker, IssueIdentifierBadge } from ".";
 import { IssueActionsDropdown, useIssueActions } from "../actions";
 import { ProjectPicker } from "../../projects/components/project-picker";
 import { LocalDirectoryHint } from "../../projects/components/local-directory-hint";
@@ -1638,14 +1638,21 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         <BreadcrumbHeader
           segments={breadcrumbSegments}
           leaf={
-            <AppLink
-              href={paths.issueDetail(issue.id)}
-              className="flex min-w-0 transition-opacity hover:opacity-80"
-            >
-              <span className="truncate font-medium text-foreground">
-                {issue.identifier} {issue.title}
-              </span>
-            </AppLink>
+            <span className="flex min-w-0 items-center gap-1.5">
+              <IssueIdentifierBadge
+                issue={issue}
+                onCopy={actions.copyIdentifier}
+                className="shrink-0"
+              />
+              <AppLink
+                href={paths.issueDetail(issue.id)}
+                className="flex min-w-0 transition-opacity hover:opacity-80"
+              >
+                <span className="truncate font-medium text-foreground">
+                  {issue.title}
+                </span>
+              </AppLink>
+            </span>
           }
           actions={
             <>
