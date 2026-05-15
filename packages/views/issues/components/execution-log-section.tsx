@@ -415,8 +415,9 @@ function RowShell({
         <ActorAvatar
           actorType="agent"
           actorId={task.agent_id}
-          size={20}
+          size={30}
           enableHoverCard
+          showName
         />
       ) : (
         <span className="inline-block h-5 w-5 shrink-0 rounded-full bg-muted" />

@@ -665,7 +665,7 @@ function AgentDropdown({
         <ActorAvatar
           actorType="agent"
           actorId={activeAgent.id}
-          size={24}
+          size={34}
           enableHoverCard
           showStatusDot
         />
@@ -722,7 +722,7 @@ function AgentMenuItem({
       <ActorAvatar
         actorType="agent"
         actorId={agent.id}
-        size={24}
+        size={34}
         enableHoverCard
         showStatusDot
       />
@@ -961,7 +961,7 @@ function SessionDropdown({
           <ActorAvatar
             actorType="agent"
             actorId={agent.id}
-            size={24}
+            size={34}
             enableHoverCard
             showStatusDot
           />
@@ -1160,7 +1160,7 @@ function SessionDropdown({
               <ActorAvatar
                 actorType="agent"
                 actorId={triggerAgent.id}
-                size={24}
+                size={34}
                 enableHoverCard
                 showStatusDot
               />

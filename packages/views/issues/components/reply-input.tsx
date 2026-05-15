@@ -107,7 +107,7 @@ function ReplyInput({
     }
   };
 
-  const avatarSize = size === "sm" ? 22 : 28;
+  const avatarSize = size === "sm" ? 32 : 38;
 
   return (
     <div className="group/editor flex items-start gap-2.5">
