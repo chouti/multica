@@ -87,16 +87,16 @@ export function ActorAvatar({
 }: ActorAvatarProps) {
   const { getActorName, getActorInitials, getActorAvatarUrl } = useActorName();
   const paths = useWorkspacePaths();
+  const actorName = getActorName(actorType, actorId);
   const avatar = (
     <ActorAvatarBase
-      name={getActorName(actorType, actorId)}
+      name={actorName}
       initials={getActorInitials(actorType, actorId)}
       avatarUrl={getActorAvatarUrl(actorType, actorId)}
       isAgent={actorType === "agent"}
       isSystem={actorType === "system"}
       isSquad={actorType === "squad"}
       size={size}
-      showName={showName}
       className={className}
     />
   );
@@ -104,15 +104,29 @@ export function ActorAvatar({
   // Optional presence dot overlay. Only meaningful for agents — members have
   // no presence backbone. Wrapping unconditionally with relative inline-flex
   // would create extra DOM for every avatar; we only wrap when a dot is asked
-  // for.
+  // for.  The dot must anchor to the avatar element itself, NOT to the
+  // showName wrapper — otherwise `absolute bottom-0 right-0` lands on the
+  // name text's right edge instead of the avatar circle's right edge.
   const wrapDot = showStatusDot && actorType === "agent";
   const dotted = wrapDot ? (
-    <span className="relative inline-flex">
+    <span className="relative inline-flex shrink-0">
       {avatar}
       <AgentStatusDot agentId={actorId} size={size} />
     </span>
   ) : (
     avatar
+  );
+
+  // showName: render actor name to the right of the (possibly dotted) avatar.
+  // `min-w-0` on the wrapper + `overflow-hidden` on the name span lets
+  // `truncate` / `text-overflow: ellipsis` kick in inside flex parents.
+  const withName = showName ? (
+    <span className="inline-flex items-center gap-1.5 min-w-0">
+      {dotted}
+      <span className="text-sm truncate overflow-hidden">{actorName}</span>
+    </span>
+  ) : (
+    dotted
   );
   const shouldLinkToProfile =
     profileLink ??
@@ -127,9 +141,9 @@ export function ActorAvatar({
           : null
     : null;
   const content = profileHref ? (
-    <ActorAvatarProfileLink href={profileHref}>{dotted}</ActorAvatarProfileLink>
+    <ActorAvatarProfileLink href={profileHref}>{withName}</ActorAvatarProfileLink>
   ) : (
-    dotted
+    withName
   );
 
   if (!enableHoverCard) {
