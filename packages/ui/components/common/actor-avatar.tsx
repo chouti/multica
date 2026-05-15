@@ -73,9 +73,9 @@ function ActorAvatar({
   }
 
   return (
-    <span className="inline-flex items-center gap-1.5">
+    <span className="inline-flex items-center gap-1.5 min-w-0">
       {avatarElement}
-      <span className="text-sm truncate">{name}</span>
+      <span className="text-sm truncate overflow-hidden">{name}</span>
     </span>
   );
 }
