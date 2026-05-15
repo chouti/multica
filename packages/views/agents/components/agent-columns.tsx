@@ -209,7 +209,7 @@ function AgentNameCell({ row }: { row: AgentRow }) {
             <ActorAvatar
               actorType="member"
               actorId={ownerIdToShow}
-              size={14}
+              size={34}
             />
           )}
           {isArchived && (

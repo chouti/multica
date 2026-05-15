@@ -573,7 +573,7 @@ export function SearchCommand() {
                       name={member.name}
                       initials={memberInitials(member.name)}
                       avatarUrl={resolvePublicFileUrl(member.avatar_url)}
-                      size={22}
+                      size={32}
                     />
                     <div className="min-w-0 flex-1">
                       <div className="truncate">
