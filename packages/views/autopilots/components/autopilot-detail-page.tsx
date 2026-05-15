@@ -734,7 +734,7 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
                   <ActorAvatar
                     actorType={autopilot.assignee_type}
                     actorId={autopilot.assignee_id}
-                    size={20}
+                    size={30}
                     enableHoverCard={autopilot.assignee_type === "agent"}
                     showStatusDot={autopilot.assignee_type === "agent"}
                   />

@@ -161,7 +161,7 @@ function AgentAssignees({ agents }: { agents: Agent[] }) {
                   initials={a.name.slice(0, 2).toUpperCase()}
                   avatarUrl={a.avatar_url}
                   isAgent
-                  size={22}
+                  size={32}
                 />
               </span>
             }
@@ -222,7 +222,7 @@ function SourceCell({
             name={creator.name}
             initials={creator.name.slice(0, 2).toUpperCase()}
             avatarUrl={creator.avatar_url}
-            size={14}
+            size={24}
           />
           <span className="truncate">{t(($) => $.table.by_creator, { name: creator.name })}</span>
         </div>

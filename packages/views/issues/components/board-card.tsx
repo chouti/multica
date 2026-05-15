@@ -160,7 +160,7 @@ export const BoardCardContent = memo(function BoardCardContent({
                     <ActorAvatar
                       actorType={issue.assignee_type!}
                       actorId={issue.assignee_id!}
-                      size={22}
+                      size={32}
                       enableHoverCard
                     />
                   }
@@ -170,7 +170,7 @@ export const BoardCardContent = memo(function BoardCardContent({
               <ActorAvatar
                 actorType={issue.assignee_type!}
                 actorId={issue.assignee_id!}
-                size={22}
+                size={32}
                 enableHoverCard
               />
             ))}

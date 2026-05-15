@@ -314,7 +314,7 @@ function SingleAgentLiveCard({ task, items, issueId, agentName }: SingleAgentLiv
     <div className={isQueued ? "rounded-lg border border-border bg-muted/30" : "rounded-lg border border-info/20 bg-info/5"}>
       <div className="flex items-center gap-2 px-3 py-2 text-muted-foreground">
         {task.agent_id ? (
-          <ActorAvatar actorType="agent" actorId={task.agent_id} size={20} enableHoverCard showStatusDot />
+          <ActorAvatar actorType="agent" actorId={task.agent_id} size={30} enableHoverCard showStatusDot />
         ) : (
           <div className="flex items-center justify-center h-5 w-5 rounded-full shrink-0 bg-info/10 text-info">
             <Bot className="h-3 w-3" />

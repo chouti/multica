@@ -125,7 +125,7 @@ export const ListRow = memo(function ListRow({
             <ActorAvatar
               actorType={issue.assignee_type!}
               actorId={issue.assignee_id!}
-              size={20}
+              size={30}
               enableHoverCard
             />
           )}
