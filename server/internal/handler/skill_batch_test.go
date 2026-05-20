@@ -24,7 +24,7 @@ func TestBatchTimeout(t *testing.T) {
 		{"5 skills", 5, 30 * time.Second},
 		{"10 skills", 10, 60 * time.Second},
 		{"20 skills", 20, 90 * time.Second},
-		{"43 skills", 43, 159 * time.Second},
+		{"43 skills", 43, 150 * time.Second},
 		{"100 skills", 100, 300 * time.Second},
 		{"1000 skills (capped)", 1000, 300 * time.Second},
 	}
