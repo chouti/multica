@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -326,6 +327,44 @@ func runSkillDelete(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+// isSkillImportBatch detects whether a skill import URL targets a 2-segment
+// skills.sh repo (batch mode) vs a 3-segment single skill URL.
+//
+// Correctly handles scheme prefixes: "https://skills.sh/owner/repo" has
+// 2 path segments (owner, repo), not 4 — url.Parse strips the "https://"
+// before counting.
+func isSkillImportBatch(rawURL string) bool {
+	// Normalize: prepend scheme if missing so url.Parse treats host correctly
+	if !strings.HasPrefix(rawURL, "http://") && !strings.HasPrefix(rawURL, "https://") {
+		rawURL = "https://" + rawURL
+	}
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return false
+	}
+	if !strings.Contains(u.Host, "skills.sh") {
+		return false
+	}
+	segments := strings.Split(strings.Trim(u.Path, "/"), "/")
+	// Filter out empty segments
+	count := 0
+	for _, s := range segments {
+		if s != "" {
+			count++
+		}
+	}
+	return count == 2
+}
+
+// intResult safely extracts an integer value from a JSON response map.
+// Returns 0 when the key is missing or the type assertion fails.
+func intResult(m map[string]any, key string) int {
+	if v, ok := m[key].(float64); ok {
+		return int(v)
+	}
+	return 0
+}
+
 func runSkillImport(cmd *cobra.Command, _ []string) error {
 	client, err := newAPIClient(cmd)
 	if err != nil {
@@ -341,8 +380,8 @@ func runSkillImport(cmd *cobra.Command, _ []string) error {
 		"url": importURL,
 	}
 
-	// Detect batch mode (skills.sh/owner/repo)
-	isBatch := strings.Contains(importURL, "skills.sh") && strings.Count(strings.TrimSuffix(importURL, "/"), "/") <= 3
+	// Detect batch mode (skills.sh/owner/repo = 2 path segments)
+	isBatch := isSkillImportBatch(importURL)
 	timeout := 60 * time.Second
 	endpoint := "/api/skills/import"
 
@@ -365,9 +404,9 @@ func runSkillImport(cmd *cobra.Command, _ []string) error {
 	}
 
 	if isBatch {
-		imported := int(result["imported"].(float64))
-		skipped := int(result["skipped"].(float64))
-		failed := int(result["failed"].(float64))
+		imported := intResult(result, "imported")
+		skipped := intResult(result, "skipped")
+		failed := intResult(result, "failed")
 		fmt.Printf("Batch import complete: %d imported, %d skipped, %d failed\n", imported, skipped, failed)
 	} else {
 		fmt.Printf("Skill imported: %s (%s)\n", strVal(result, "name"), strVal(result, "id"))
