@@ -1408,7 +1408,7 @@ func TestParseSkillsShParts_InvalidSegments(t *testing.T) {
 	}
 }
 
-// R1.1: Test the handler-level truncation rejection in importSkillsBatch.
+// Test the handler-level truncation rejection in importSkillsBatch.
 // If the 4-line "if result.Truncated { ... 502 ... }" block is accidentally
 // removed, this test will fail — unlike TestImportAllSkillsFromRepo_TruncatedTreeStillWorks
 // which only tests the function layer.
@@ -1460,4 +1460,3 @@ func TestImportSkillsBatch_RejectsTruncatedTree(t *testing.T) {
 		t.Fatalf("error message = %q, want it to contain 'acme/large'", errMsg)
 	}
 }
-

@@ -2025,25 +2025,25 @@ func (h *Handler) importSkillsBatch(w http.ResponseWriter, r *http.Request, spec
 				slog.Info("skills.sh batch import: skill already exists, skipping", "name", skill.name)
 				continue
 			}
-		// Check if context was cancelled (timeout)
-		if ctx.Err() != nil {
-			// Count the in-flight skill as failed
-			summary.Failed++
-			// Count remaining unprocessed skills as failed.
-			// i is the 0-indexed position of the current skill, so
-			// remaining = total - i - 1 (excludes all processed skills
-			// and the in-flight one already counted above).
-			remaining := len(result.Skills) - i - 1
-			summary.Failed += remaining
+			// Check if context was cancelled (timeout)
+			if ctx.Err() != nil {
+				// Count the in-flight skill as failed
+				summary.Failed++
+				// Count remaining unprocessed skills as failed.
+				// i is the 0-indexed position of the current skill, so
+				// remaining = total - i - 1 (excludes all processed skills
+				// and the in-flight one already counted above).
+				remaining := len(result.Skills) - i - 1
+				summary.Failed += remaining
 
-			slog.Warn("skills.sh batch import: context cancelled, aborting",
-				"error", ctx.Err(), "imported", summary.Imported, "skipped", summary.Skipped, "failed", summary.Failed)
-			summary.Errors = append(summary.Errors, BatchImportError{
-				SkillName: "",
-				Error:     fmt.Sprintf("batch import timed out after %s (%d skills remaining)", batchTimeout(len(result.Skills)), remaining),
-			})
-			break
-		}
+				slog.Warn("skills.sh batch import: context cancelled, aborting",
+					"error", ctx.Err(), "imported", summary.Imported, "skipped", summary.Skipped, "failed", summary.Failed)
+				summary.Errors = append(summary.Errors, BatchImportError{
+					SkillName: "",
+					Error:     fmt.Sprintf("batch import timed out after %s (%d skills remaining)", batchTimeout(len(result.Skills)), remaining),
+				})
+				break
+			}
 			summary.Failed++
 			summary.Errors = append(summary.Errors, BatchImportError{
 				SkillName: skill.name,
