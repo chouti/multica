@@ -293,9 +293,11 @@ function SourceCard({
 function UrlForm({
   onCreated,
   onCancel,
+  onClose,
 }: {
   onCreated: (skill: Skill) => void;
   onCancel: () => void;
+  onClose: () => void;
 }) {
   const { t } = useT("skills");
   const qc = useQueryClient();
@@ -316,9 +318,14 @@ function UrlForm({
       if (isBatchUrl(trimmed)) {
         const summary = await api.importSkillsBatch({ url: trimmed });
         const first = summary.skills[0];
-        if (first) seedAfterCreate(qc, wsId, first);
+        if (first) {
+          seedAfterCreate(qc, wsId, first);
+          onCreated(first);
+        } else {
+          // 0 imported (all duplicates or failures) — close dialog without navigating
+          onClose();
+        }
         toast.success(t(($) => $.create.url.toast_imported_batch, { count: summary.imported }));
-        onCreated(first ?? ({} as Skill));
       } else {
         const skill = await api.importSkill({ url: trimmed });
         seedAfterCreate(qc, wsId, skill);
@@ -532,6 +539,7 @@ export function CreateSkillDialog({
           <UrlForm
             onCreated={handleCreated}
             onCancel={() => setMethod("chooser")}
+            onClose={onClose}
           />
         )}
         {method === "runtime" && (
