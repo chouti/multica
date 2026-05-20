@@ -37,7 +37,6 @@ import type {
   UpdateSkillRequest,
   SetAgentSkillsRequest,
   BatchImportResponse,
-  BatchImportError,
   PersonalAccessToken,
   CreatePersonalAccessTokenRequest,
   CreatePersonalAccessTokenResponse,
