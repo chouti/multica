@@ -115,6 +115,7 @@ import {
   AgentTemplateSchema,
   AgentTemplateSummaryListSchema,
   AttachmentResponseSchema,
+  BatchImportResponseSchema,
   ChildIssuesResponseSchema,
   CommentsListSchema,
   CloudRuntimeNodeListSchema,
@@ -129,6 +130,7 @@ import {
   EMPTY_ATTACHMENT,
   EMPTY_CLOUD_RUNTIME_NODE,
   EMPTY_CLOUD_RUNTIME_NODE_LIST,
+  EMPTY_BATCH_IMPORT_RESPONSE,
   EMPTY_CREATE_AGENT_FROM_TEMPLATE_RESPONSE,
   EMPTY_GROUPED_ISSUES_RESPONSE,
   EMPTY_LIST_ISSUES_RESPONSE,
@@ -1275,10 +1277,16 @@ export class ApiClient {
   }
 
   async importSkillsBatch(data: { url: string }): Promise<BatchImportResponse> {
-    return this.fetch("/api/skills/import/batch", {
+    const raw = await this.fetchRaw("/api/skills/import/batch", {
       method: "POST",
       body: JSON.stringify(data),
     });
+    return parseWithFallback<BatchImportResponse>(
+      raw,
+      BatchImportResponseSchema,
+      EMPTY_BATCH_IMPORT_RESPONSE,
+      { endpoint: "/api/skills/import/batch" },
+    );
   }
 
   async listAgentSkills(agentId: string): Promise<SkillSummary[]> {

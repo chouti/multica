@@ -609,3 +609,24 @@ export const EMPTY_USER: User = {
   created_at: "",
   updated_at: "",
 };
+
+// ---------------------------------------------------------------------------
+// Batch import — the response shape that broke in the PR #2669 iteration.
+// Lenient: numbers are z.number() (not integer-gated), arrays default to [].
+// ---------------------------------------------------------------------------
+
+export const BatchImportResponseSchema = z.object({
+  imported: z.number(),
+  skipped: z.number(),
+  failed: z.number(),
+  skills: z.array(z.object({}).loose()).default([]),
+  errors: z.array(z.object({}).loose()).default([]),
+}).loose();
+
+export const EMPTY_BATCH_IMPORT_RESPONSE = {
+  imported: 0,
+  skipped: 0,
+  failed: 0,
+  skills: [],
+  errors: [],
+};
