@@ -1989,7 +1989,9 @@ func (h *Handler) importSkillsBatch(w http.ResponseWriter, r *http.Request, spec
 	summary.Failed += len(result.ExtractFailures)
 	summary.Errors = append(summary.Errors, result.ExtractFailures...)
 
-	for _, skill := range result.Skills {
+	// Track how many skills from the DB-write loop have been processed
+	// (separate from summary.Failed which includes extraction failures).
+	for i, skill := range result.Skills {
 		files := make([]CreateSkillFileRequest, 0, len(skill.files))
 		for _, f := range skill.files {
 			if !validateFilePath(f.path) {
@@ -2027,8 +2029,11 @@ func (h *Handler) importSkillsBatch(w http.ResponseWriter, r *http.Request, spec
 		if ctx.Err() != nil {
 			// Count the in-flight skill as failed
 			summary.Failed++
-			// Count remaining unprocessed skills as failed
-			remaining := len(result.Skills) - summary.Imported - summary.Skipped - summary.Failed
+			// Count remaining unprocessed skills as failed.
+			// i is the 0-indexed position of the current skill, so
+			// remaining = total - i - 1 (excludes all processed skills
+			// and the in-flight one already counted above).
+			remaining := len(result.Skills) - i - 1
 			summary.Failed += remaining
 
 			slog.Warn("skills.sh batch import: context cancelled, aborting",
