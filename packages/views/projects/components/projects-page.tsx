@@ -97,7 +97,7 @@ function ProjectCard({ project }: { project: Project }) {
           renderTrigger={(leadName) => (
             <button type="button" className="flex items-center gap-1.5 rounded px-1.5 py-0.5 -mx-1.5 hover:bg-accent/60 transition-colors cursor-pointer">
               {project.lead_type && project.lead_id ? (
-                <ActorAvatar actorType={project.lead_type} actorId={project.lead_id} size={20} enableHoverCard />
+                <ActorAvatar actorType={project.lead_type} actorId={project.lead_id} size={30} enableHoverCard />
               ) : (
                 <span className="inline-flex h-5 w-5 rounded-full border border-dashed border-muted-foreground/30" />
               )}
@@ -161,7 +161,7 @@ function ProjectCardCompact({ project }: { project: Project }) {
           <button type="button" className="flex items-center justify-start gap-1.5 rounded px-1 py-0.5 hover:bg-accent/60 transition-colors cursor-pointer">
             <span className="shrink-0">
               {project.lead_type && project.lead_id ? (
-                <ActorAvatar actorType={project.lead_type} actorId={project.lead_id} size={20} enableHoverCard />
+                <ActorAvatar actorType={project.lead_type} actorId={project.lead_id} size={30} enableHoverCard />
               ) : (
                 <span className="inline-flex h-5 w-5 rounded-full border border-dashed border-muted-foreground/30" />
               )}

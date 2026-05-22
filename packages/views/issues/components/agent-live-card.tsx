@@ -302,7 +302,7 @@ export function AgentLiveCard({ issueId }: AgentLiveCardProps) {
               aria-expanded={expanded}
               className="flex w-full items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-info/10 aria-expanded:bg-info/10 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
             >
-              <AgentAvatarStack agentIds={agentIds} size={20} max={4} />
+              <AgentAvatarStack agentIds={agentIds} size={30} max={4} />
               <span className="flex min-w-0 items-center gap-1.5 text-xs">
                 {anyRunning ? (
                   <Loader2 className="h-3 w-3 animate-spin text-info shrink-0" />
@@ -405,7 +405,7 @@ function AgentLiveRow({ task, items, agentName, onRequestCancel, cancelling }: A
   return (
     <div className="flex items-center gap-2 px-3 py-2 text-muted-foreground">
       {task.agent_id ? (
-        <ActorAvatar actorType="agent" actorId={task.agent_id} size={20} enableHoverCard showStatusDot />
+        <ActorAvatar actorType="agent" actorId={task.agent_id} size={30} enableHoverCard showStatusDot />
       ) : (
         <div className="flex items-center justify-center h-5 w-5 rounded-full shrink-0 bg-info/10 text-info">
           <Bot className="h-3 w-3" />
