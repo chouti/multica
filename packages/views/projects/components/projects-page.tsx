@@ -97,7 +97,7 @@ function ProjectCard({ project }: { project: Project }) {
           renderTrigger={(leadName) => (
             <button type="button" className="flex items-center gap-1.5 rounded px-1.5 py-0.5 -mx-1.5 hover:bg-accent/60 transition-colors cursor-pointer">
               {project.lead_type && project.lead_id ? (
-                <ActorAvatar actorType={project.lead_type} actorId={project.lead_id} size={20} enableHoverCard />
+                <ActorAvatar actorType={project.lead_type} actorId={project.lead_id} size={30} enableHoverCard />
               ) : (
                 <span className="inline-flex h-5 w-5 rounded-full border border-dashed border-muted-foreground/30" />
               )}
@@ -172,64 +172,6 @@ function ProjectCardCompact({ project }: { project: Project }) {
           </button>
         )}
       />
-        />
-        <PopoverContent align="start" className="w-52 p-0">
-          <div className="px-2 py-1.5 border-b">
-            <input
-              type="text"
-              value={leadFilter}
-              onChange={(e) => setLeadFilter(e.target.value)}
-              placeholder={t(($) => $.lead.assign_placeholder)}
-              className="w-full bg-transparent text-sm placeholder:text-muted-foreground outline-none"
-            />
-          </div>
-          <div className="p-1 max-h-60 overflow-y-auto">
-            <button
-              type="button"
-              onClick={() => { handleUpdate({ lead_type: null, lead_id: null }); setLeadOpen(false); }}
-              className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent transition-colors"
-            >
-              <UserMinus className="h-3.5 w-3.5 text-muted-foreground" />
-              <span className="text-muted-foreground">{t(($) => $.lead.no_lead)}</span>
-            </button>
-            {filteredMembers.length > 0 && (
-              <>
-                <div className="px-2 pt-2 pb-1 text-xs font-medium text-muted-foreground uppercase tracking-wider">{t(($) => $.lead.members_group)}</div>
-                {filteredMembers.map((m) => (
-                  <button
-                    type="button"
-                    key={m.user_id}
-                    onClick={() => { handleUpdate({ lead_type: "member", lead_id: m.user_id }); setLeadOpen(false); }}
-                    className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent transition-colors"
-                  >
-                    <ActorAvatar actorType="member" actorId={m.user_id} size={26} />
-                    <span>{m.name}</span>
-                  </button>
-                ))}
-              </>
-            )}
-            {filteredAgents.length > 0 && (
-              <>
-                <div className="px-2 pt-2 pb-1 text-xs font-medium text-muted-foreground uppercase tracking-wider">{t(($) => $.lead.agents_group)}</div>
-                {filteredAgents.map((a) => (
-                  <button
-                    type="button"
-                    key={a.id}
-                    onClick={() => { handleUpdate({ lead_type: "agent", lead_id: a.id }); setLeadOpen(false); }}
-                    className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent transition-colors"
-                  >
-                    <ActorAvatar actorType="agent" actorId={a.id} size={26} showStatusDot />
-                    <span>{a.name}</span>
-                  </button>
-                ))}
-              </>
-            )}
-            {filteredMembers.length === 0 && filteredAgents.length === 0 && leadFilter && (
-              <div className="px-2 py-3 text-center text-sm text-muted-foreground">{t(($) => $.lead.no_results)}</div>
-            )}
-          </div>
-        </PopoverContent>
-      </Popover>
 
       <span className="text-left text-xs text-muted-foreground tabular-nums">
         {formatRelativeDate(project.created_at)}
