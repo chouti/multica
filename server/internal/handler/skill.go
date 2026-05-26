@@ -2037,7 +2037,11 @@ func (h *Handler) ImportSkill(w http.ResponseWriter, r *http.Request) {
 // single-skill import so that the response shape (BatchImportResponse)
 // does not break existing UI/CLI clients that expect a single Skill.
 func (h *Handler) ImportSkillsBatch(w http.ResponseWriter, r *http.Request) {
-	workspaceID := workspaceIDFromURL(r, "workspaceId")
+	workspaceID := h.resolveWorkspaceID(r)
+	if workspaceID == "" {
+		writeError(w, http.StatusBadRequest, "workspace_id or workspace_slug is required")
+		return
+	}
 	member, ok := h.requireWorkspaceRole(w, r, workspaceID, "workspace not found", "owner", "admin", "member")
 	if !ok {
 		return
