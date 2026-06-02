@@ -1203,7 +1203,7 @@ func importAllSkillsFromRepo(httpClient *http.Client, owner, repo string) (*batc
 		}
 
 		// Parse frontmatter for name and description
-		name, description := parseSkillFrontmatter(string(skillMdBody))
+		name, description := skill.ParseSkillFrontmatter(string(skillMdBody))
 		if name == "" {
 			// Fall back to directory name
 			if skillDir != "" {
