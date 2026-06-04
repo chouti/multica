@@ -61,6 +61,12 @@ interface ActorAvatarProps {
    * and agents, while picker/menu controls keep their own click behavior.
    */
   profileLink?: boolean;
+  /**
+   * Render the actor name inline next to the avatar. Used where the avatar
+   * sits in a high-density context (execution log rows, etc.) where showing
+   * the name disambiguates otherwise-similar agent dots.
+   */
+  showName?: boolean;
 }
 
 const FOCUSABLE_ANCESTOR_SELECTOR =
@@ -77,6 +83,7 @@ export function ActorAvatar({
   showStatusDot,
   hoverCardVariant = "profile",
   profileLink,
+  showName,
 }: ActorAvatarProps) {
   const { getActorName, getActorInitials, getActorAvatarUrl } = useActorName();
   const paths = useWorkspacePaths();
