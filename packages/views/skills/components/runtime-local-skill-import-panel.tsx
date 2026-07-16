@@ -1059,17 +1059,50 @@ export function RuntimeLocalSkillImportPanel({
         </div>
       );
     }
+    // Adaptive surface: 1–2 skills fit a compact grouped summary card (no
+    // search); 3+ switch to an inline search with filtering. data-branch marks
+    // which branch rendered so tests and analytics can tell them apart.
+    const isSummaryMode = runtimeSkills.length <= 1;
+    const groupedSkills = [
+      {
+        root: "provider",
+        heading: t(($) => $.runtime_import.provider_group_heading),
+        skills: [] as RuntimeLocalSkillSummary[],
+      },
+      {
+        root: "universal",
+        heading: t(($) => $.runtime_import.universal_group_heading),
+        skills: [] as RuntimeLocalSkillSummary[],
+      },
+      {
+        root: "other",
+        heading: t(($) => $.runtime_import.other_group_heading),
+        skills: [] as RuntimeLocalSkillSummary[],
+      },
+    ];
+    for (const s of filteredRuntimeSkills) {
+      if (s.root === "provider") groupedSkills[0]!.skills.push(s);
+      else if (s.root === "universal") groupedSkills[1]!.skills.push(s);
+      else groupedSkills[2]!.skills.push(s);
+    }
+    const visibleGroups = groupedSkills.filter((g) => g.skills.length > 0);
+
     return (
-      <div className="flex flex-col gap-2">
-        <div className="relative">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            value={skillSearchQuery}
-            onChange={(e) => setSkillSearchQuery(e.target.value)}
-            placeholder={t(($) => $.runtime_import.search_placeholder)}
-            className="h-9 pl-8 text-sm"
-          />
-        </div>
+      <div
+        className="flex flex-col gap-2"
+        data-branch={isSummaryMode ? "summary" : "search"}
+      >
+        {!isSummaryMode && (
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={skillSearchQuery}
+              onChange={(e) => setSkillSearchQuery(e.target.value)}
+              placeholder={t(($) => $.runtime_import.search_placeholder)}
+              className="h-9 pl-8 text-sm"
+            />
+          </div>
+        )}
 
         {filteredRuntimeSkills.length === 0 ? (
           <div className="rounded-lg border border-dashed px-4 py-8 text-center">
@@ -1102,26 +1135,33 @@ export function RuntimeLocalSkillImportPanel({
               </span>
             </label>
 
-            {filteredRuntimeSkills.map((s) => (
-              <SkillItem
-                key={s.key}
-                skill={s}
-                checked={selectedKeys.has(s.key)}
-                onToggle={() => toggleSkill(s.key)}
-                disabled={importing}
-                expanded={singleSelectedSkill?.key === s.key}
-                editName={
-                  singleSelectedSkill?.key === s.key ? editName : undefined
-                }
-                editDescription={
-                  singleSelectedSkill?.key === s.key
-                    ? editDescription
-                    : undefined
-                }
-                onNameChange={setEditName}
-                onDescriptionChange={setEditDescription}
-                query={skillSearchQuery}
-              />
+            {visibleGroups.map((group) => (
+              <div key={group.root} className="space-y-1">
+                <div className="px-1 text-xs font-medium text-muted-foreground">
+                  {group.heading}
+                </div>
+                {group.skills.map((s) => (
+                  <SkillItem
+                    key={s.key}
+                    skill={s}
+                    checked={selectedKeys.has(s.key)}
+                    onToggle={() => toggleSkill(s.key)}
+                    disabled={importing}
+                    expanded={singleSelectedSkill?.key === s.key}
+                    editName={
+                      singleSelectedSkill?.key === s.key ? editName : undefined
+                    }
+                    editDescription={
+                      singleSelectedSkill?.key === s.key
+                        ? editDescription
+                        : undefined
+                    }
+                    onNameChange={setEditName}
+                    onDescriptionChange={setEditDescription}
+                    query={skillSearchQuery}
+                  />
+                ))}
+              </div>
             ))}
           </>
         )}
@@ -1162,6 +1202,10 @@ export function RuntimeLocalSkillImportPanel({
             {t(($) => $.runtime_import.runtime_label)}
           </label>
           <Select
+            items={localRuntimes.map((runtime) => ({
+              value: runtime.id,
+              label: runtimeLabel(runtime),
+            }))}
             value={selectedRuntimeId}
             onValueChange={(v) => v && setSelectedRuntimeId(v)}
           >

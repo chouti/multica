@@ -867,7 +867,11 @@ describe("RuntimeLocalSkillImportPanel", () => {
     fireEvent.change(searchInput, { target: { value: "bet" } });
 
     await waitFor(() => {
-      expect(screen.getByText("Beta")).toBeInTheDocument();
+      // Beta survives; its name is highlight-split by the "bet" match, so
+      // assert on its description which stays a single text node.
+      expect(
+        screen.getByText("Generate code from specs"),
+      ).toBeInTheDocument();
     });
     expect(screen.queryByText("Alpha")).not.toBeInTheDocument();
     expect(screen.queryByText("Gamma")).not.toBeInTheDocument();
@@ -891,7 +895,7 @@ describe("RuntimeLocalSkillImportPanel", () => {
     fireEvent.change(searchInput, { target: { value: "zzzzz" } });
 
     await waitFor(() => {
-      expect(screen.getByText(/No skills match/)).toBeInTheDocument();
+      expect(screen.getByText(/No local skills match/)).toBeInTheDocument();
     });
   });
 

@@ -335,7 +335,17 @@ function InviteDialog({
           </div>
           <div className="grid gap-2">
             <Label>{t(($) => $.invite_role)}</Label>
-            <Select value={role} onValueChange={(v) => setRole(v as MemberRole)}>
+            <Select
+              items={(["member", "admin", "owner"] as const).map((value) => ({
+                value,
+                label:
+                  value === "member" ? t(($) => $.role_member)
+                  : value === "admin" ? t(($) => $.role_admin)
+                  : t(($) => $.role_owner),
+              }))}
+              value={role}
+              onValueChange={(v) => setRole(v as MemberRole)}
+            >
               <SelectTrigger>
                 <SelectValue />
               </SelectTrigger>
@@ -478,6 +488,13 @@ function EditWorkspacesDialog({
                           {editingRole?.workspaceId === ws.workspace_id ? (
                             <>
                               <Select
+                                items={(["member", "admin", "owner"] as const).map((value) => ({
+                                  value,
+                                  label:
+                                    value === "member" ? t(($) => $.role_member)
+                                    : value === "admin" ? t(($) => $.role_admin)
+                                    : t(($) => $.role_owner),
+                                }))}
                                 value={editingRole.role}
                                 onValueChange={(v) =>
                                   setEditingRole({ ...editingRole, role: v as MemberRole })
