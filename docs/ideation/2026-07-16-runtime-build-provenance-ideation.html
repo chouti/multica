@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ideation: 自部署运行时构建溯源</title>
+  <style>
+    :root { --bg:#fbfbfb; --card:#fff; --ink:#222; --muted:#666; --line:#dedede; --blue:#2457a6; --green:#17683b; --amber:#815200; --red:#9a3030; }
+    * { box-sizing:border-box } body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.65 Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif; }
+    main { width:min(920px, calc(100% - 32px)); margin:40px auto 64px; } header { padding-bottom:24px; border-bottom:1px solid var(--line); } h1 { margin:0 0 8px; font-size:26px; font-weight:500; letter-spacing:-.02em } h2 { margin:38px 0 14px; font-size:18px; font-weight:500 } h3 { margin:0 0 10px; font-size:16px; font-weight:500 } p { max-width:74ch; margin:9px 0 } .meta,.chips { display:flex; flex-wrap:wrap; gap:7px; } .chip { border:1px solid var(--line); border-radius:999px; padding:2px 9px; font:12px/1.5 "Geist Mono", ui-monospace, monospace; color:#444; background:#fff; } .lede { color:var(--muted); max-width:70ch; } .idea { padding:19px 20px; margin:12px 0; background:var(--card); border:1px solid var(--line); border-radius:8px; } .rank { color:var(--blue); font-family:"Geist Mono",ui-monospace,monospace; margin-right:7px; } .field { margin-top:9px; color:#3f3f3f; } .field b { color:var(--ink); font-weight:500 } code { font:12px/1.4 "Geist Mono",ui-monospace,monospace; background:#f1f1f1; padding:1px 4px; border-radius:3px; } ul { padding-left:20px; max-width:76ch } table { border-collapse:collapse; width:100%; background:#fff; font-size:14px } th,td { text-align:left; vertical-align:top; padding:9px 10px; border:1px solid var(--line) } th { font-weight:500; background:#f5f5f5 } .good { color:var(--green) } .warn { color:var(--amber) } a { color:var(--blue) } footer { margin-top:42px; padding-top:14px; border-top:1px solid var(--line); color:var(--muted); font-size:12px } @media (max-width:600px){ main{width:min(100% - 22px,920px);margin-top:24px}.idea{padding:15px} }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <div class="meta"><span class="chip">Ideation</span><span class="chip">2026-07-16</span><span class="chip">代码库议题</span><span class="chip">6 个已筛选方向</span></div>
+    <h1>自部署运行时构建溯源</h1>
+    <p class="lede">目标不是显示一个容易误导的版本字符串，而是让正在运行的 backend 与 frontend 可回答：它对应哪个官方 tag、精确来源是什么、这些判断有多可信，以及是否存在本地定制或部署错配。</p>
+  </header>
+
+  <section id="grounding-context"><h2>Grounding Context</h2>
+    <ul>
+      <li>Release 已将 tag 与 commit 注入 Go backend，并将 <code>NEXT_PUBLIC_APP_VERSION</code> 注入 Web；但 server 尚未公开完整构建身份，Web 版本目前主要用于客户端 identity/analytics。</li>
+      <li>已有公开 <code>/api/config</code>、可选 <code>server_version</code> 与 Help 显示路径；客户端必须以 optional/fallback 方式兼容旧 backend。</li>
+      <li><code>/health</code>、<code>/readyz</code>、<code>/healthz</code> 分别承担 liveness/readiness 与 migration 检查，不应改变其成功语义。</li>
+      <li>官方 Compose/Helm 用 tag 选镜像；本地 build 默认 backend 为 <code>dev/unknown</code>、frontend 固定 <code>dev</code>，正是溯源断点。</li>
+      <li>外部模式支持：<a href="https://git-scm.com/docs/git-describe">git describe</a> 的 tag/commit/dirty 表达、<a href="https://specs.opencontainers.org/image-spec/annotations/">OCI version/revision labels</a>，以及 Next.js public env 的编译期冻结。</li>
+    </ul>
+  </section>
+
+  <section id="topic-axes"><h2>Topic Axes</h2>
+    <div class="chips"><span class="chip">构建来源与官方基线</span><span class="chip">服务诊断/API 与可见性</span><span class="chip">Compose/Helm/镜像部署链路</span></div>
+  </section>
+
+  <section id="ranked-ideas"><h2>Ranked Ideas</h2>
+    <article class="idea" id="r1"><h3><span class="rank">R1.</span>统一 Build Provenance 契约，并自动为本地构建盖章</h3><div class="chips"><span class="chip">构建来源与官方基线</span><span class="chip good">信心 高</span><span class="chip">复杂度 中</span></div><p>定义 backend、frontend、镜像与部署工具共享的结构化身份：<code>official_tag</code>、<code>source_revision</code>、<code>official_baseline</code>（exact/ahead/unknown）、<code>build_kind</code>（official/local）、<code>source_tree</code>（clean/dirty/unknown）与 <code>built_at</code>。本地 Compose build 在构建期从 Git 生成这些事实；没有可靠 Git 元数据时明确输出 unknown，而不是把 <code>dev</code> 静默隐藏。</p><p class="field"><b>Basis:</b> direct: release 已传 backend VERSION/COMMIT 与 Web app version；本地 build 默认 dev/unknown。 external: <code>git describe --dirty</code> 可表述最近 tag、偏离与工作树状态。</p><p class="field"><b>Rationale:</b> 直接回答“基于哪个官方 tag”，同时不把定制构建伪装成官方发布物；是其余诊断与部署能力的共同语义基础。</p><p class="field"><b>Downsides:</b> 必须清晰规定字段来源与 unknown 语义，容器运行时不能自行猜测 dirty 状态。</p></article>
+
+    <article class="idea" id="r2"><h3><span class="rank">R2.</span>兼容优先地把结构化 Build Manifest 接入现有 <code>/api/config</code></h3><div class="chips"><span class="chip">服务诊断/API 与可见性</span><span class="chip good">信心 高</span><span class="chip">复杂度 低</span></div><p>先在已有公开配置响应中新增可选 <code>build</code> 对象，并保留简化 <code>server_version</code>；旧客户端忽略未知字段，新客户端以 schema fallback 读取。只有当缓存、权限或 payload 语义确实分叉时，才将该 manifest 拆成专用 diagnostics endpoint。</p><p class="field"><b>Basis:</b> direct: <code>/api/config</code> 已被启动流程与 Help 使用，字段已采用 optional/loose 兼容模式；核验认为单独 endpoint 目前证据偏弱。</p><p class="field"><b>Rationale:</b> 以最小的新网络面建立脚本、UI 和支持工具的权威事实源，并保持 API 兼容规则。</p><p class="field"><b>Downsides:</b> 需要控制公共响应中暴露的 revision/时间精度，并防止 config 承担无界诊断职责。</p></article>
+
+    <article class="idea" id="r3"><h3><span class="rank">R3.</span>在 Help 提供 Web/API 溯源卡与有边界的支持包</h3><div class="chips"><span class="chip">服务诊断/API 与可见性</span><span class="chip good">信心 高</span><span class="chip">复杂度 低</span></div><p>并列显示当前 Web bundle 的构建身份、API 的 Build Manifest、官方基线及可信度，并标出“匹配、混搭、未知”而不是简单字符串相等。提供一键复制的最小诊断文本/JSON，固定字段边界，不收集环境机密或无限日志。</p><p class="field"><b>Basis:</b> direct: Web 已持有编译期版本、Help 已显示 server_version，Next public env 在 build 时冻结；这能观察浏览器实际拿到的静态产物。</p><p class="field"><b>Rationale:</b> CDN 缓存、滚动升级或只更新一端时，用户截图就能携带足够事实，显著缩短支持往返。</p><p class="field"><b>Downsides:</b> 客户端声明只能标为 observed，不能当作服务端可信事实。</p></article>
+
+    <article class="idea" id="r4"><h3><span class="rank">R4.</span>把 OCI labels 与嵌入构建事实做成双证据链</h3><div class="chips"><span class="chip">构建来源与官方基线</span><span class="chip good">信心 高</span><span class="chip">复杂度 中</span></div><p>官方与本地镜像统一写入 OCI <code>version</code>、<code>revision</code>、<code>created</code>、<code>source</code> 等 label；运行时只回显同源、编译时嵌入的事实。必要时将 digest 作为部署注入的额外证据，使 <code>docker inspect</code>/registry 与 HTTP 诊断可以交叉核验。</p><p class="field"><b>Basis:</b> direct: release 已产生 tag、sha tag 与部分 OCI labels，Go binary 已支持 ldflags。 external: OCI annotations 为 version/revision 提供标准语义。</p><p class="field"><b>Rationale:</b> tag 可能重标；两条可独立查看的证据链可把“拉错镜像、盖章错误、运行漂移”区分开。</p><p class="field"><b>Downsides:</b> 容器内不能可靠读取自身 label，必须在构建/部署期把要显示的事实显式带入。</p></article>
+
+    <article class="idea" id="r5"><h3><span class="rank">R5.</span>为 Compose 与 Helm 生成“期望部署”回执，并与运行产物对账</h3><div class="chips"><span class="chip">Compose/Helm/镜像部署链路</span><span class="chip good">信心 高</span><span class="chip">复杂度 中</span></div><p>部署层记录所选 backend/frontend image reference、tag、可用的 digest、Chart appVersion 与 release revision；诊断界面将它们标为“期望部署事实”，再与组件自报的 artifact facts 并列。对 <code>latest</code>、组件分别 override、私有仓库或本地镜像，输出 match/mismatch/unknown，而非假设 Chart tag 就是真相。</p><p class="field"><b>Basis:</b> direct: Compose/Helm 当前只表达期望 tag，Helm 可分别 override 两组件，release 同时产出 tag/sha/digest。核验确认 annotation 只能代表意图，不能冒充实际 imageID。</p><p class="field"><b>Rationale:</b> 使升级排障能区分“values 写错”“rollout 未完成”和“运行 artifact 不符”。</p><p class="field"><b>Downsides:</b> digest 取得能力因部署平台而异；不存在时必须诚实标注 absent。</p></article>
+
+    <article class="idea" id="r6"><h3><span class="rank">R6.</span>把可诊断性纳入 Release 的黑盒交付契约</h3><div class="chips"><span class="chip">Compose/Helm/镜像部署链路</span><span class="chip good">信心 高</span><span class="chip">复杂度 中</span></div><p>Release CI 除构建和发布外，启动 backend/web 镜像并断言 API manifest、前端显示的构建身份、OCI labels 与 Chart appVersion 指向同一官方 tag。另设本地 build fixture，断言 unknown/定制状态不会伪装成官方 release。</p><p class="field"><b>Basis:</b> direct: 流水线已分别构建 backend、web、镜像与 Helm chart，却没有证明这些值能被运行服务一致报告。</p><p class="field"><b>Rationale:</b> 将最容易在后续发布脚本重构中漂移的“注入但不可见”链路变成可回归测试的产品契约。</p><p class="field"><b>Downsides:</b> 增加 CI 时间与需要维护的端到端 fixture；应先锁定 R1 的稳定 schema。</p></article>
+  </section>
+
+  <section id="rejection-summary"><h2>Rejection Summary</h2><table><thead><tr><th>候选</th><th>结论</th></tr></thead><tbody>
+    <tr><td>立即新建专用 build-info endpoint</td><td>暂不独立推进：已有 <code>/api/config</code> 与 Help 通路，除非出现不同权限/缓存语义，否则重复建设。</td></tr>
+    <tr><td>在 health/readiness body 中直接塞版本</td><td>拒绝：会模糊探针的稳定 liveness/readiness 语义；版本应为独立诊断事实。</td></tr>
+    <tr><td>所有响应都附 build header</td><td>降级为未来补充：适合短指纹，但代理/缓存与前后端身份分离使它不适合主接口。</td></tr>
+    <tr><td>仅用 Helm annotation/Downward API 证明实际运行镜像</td><td>拒绝：它只能投影部署意图，不能证明 kubelet 实际拉取的 digest/imageID。</td></tr>
+    <tr><td>运行时自动重建 Git dirty 状态</td><td>拒绝：容器通常无工作树；dirty 必须是构建时事实或 unknown。</td></tr>
+    <tr><td>把 unknown/dev 静默隐藏</td><td>拒绝：当前正是诊断断点；unknown 应是 R1 契约的一等状态。</td></tr>
+  </tbody></table></section>
+  <footer>Composed 2026-07-16T00:00:00+08:00 by ce-ideate from the user prompt context and repository evidence.</footer>
+</main>
+</body>
+</html>

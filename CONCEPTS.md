@@ -16,6 +16,9 @@ A daemon-managed execution environment that exposes local skills for import. Run
 ### Daemon
 The local agent process that manages runtime lifecycle, skill discovery, and agent execution. Daemons run on developer machines and expose skills through a discovery API that the backend polls. Older daemons may omit the `root` field on skill records.
 
+### Official Release Baseline
+The nearest reachable upstream official release tag a self-hosted build is based on, verified against the canonical upstream release tags at build time. It is embedded into the backend binary or frontend bundle at build time and is intentionally distinct from the checkout's exact commit, dirty state, image tag, and deployment configuration. A build whose baseline cannot be derived and verified against the upstream tags—or explicitly trusted by the operator—must not claim one.
+
 ---
 
 ## Status Concepts
@@ -48,3 +51,4 @@ The three-state model describing who can invoke (trigger) an agent: **workspace*
 - A **Daemon** manages one or more **Runtimes** on a local machine.
 - **Skill Import** transfers a **Skill** from a **Runtime** into a workspace.
 - **Branch (UI)** determines which rendering path is shown based on skill count in a list dialog.
+- An **Official Release Baseline** identifies the upstream release context of a running backend or frontend artifact without asserting that the artifact is an unmodified official image.
