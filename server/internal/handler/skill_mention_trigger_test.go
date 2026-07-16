@@ -20,13 +20,13 @@ import (
 //   - multiple @skill mentions resolve independently
 //   - unknown / invalid skill IDs do not crash the comment handler
 type skillMentionFixture struct {
-	JID        string
-	RuntimeID  string
-	IssueID    string
-	Issue      db.Issue
-	CommentID  string
-	Comment    db.Comment
-	SkillID    string
+	JID           string
+	RuntimeID     string
+	IssueID       string
+	Issue         db.Issue
+	CommentID     string
+	Comment       db.Comment
+	SkillID       string
 	SecondSkillID string
 	// OtherAgentID is a second handler-test agent used for the
 	// "multiple skill mentions in one comment" scenario.
@@ -156,7 +156,7 @@ func triggerSkillMentions(t *testing.T, ctx context.Context, fx skillMentionFixt
 	if err != nil {
 		t.Fatalf("load comment: %v", err)
 	}
-	triggers := testHandler.computeCommentAgentTriggers(ctx, fx.Issue, comment.Content, nil, "member", testUserID, commentTriggerComputeOptions{
+	triggers, _ := testHandler.computeCommentAgentTriggers(ctx, fx.Issue, comment.Content, nil, "member", testUserID, commentTriggerComputeOptions{
 		SkillMentionAgents: skillAgents,
 	})
 	testHandler.enqueueCommentAgentTriggers(ctx, fx.Issue, comment.ID, triggers)
