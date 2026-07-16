@@ -19,6 +19,8 @@ The local agent process that manages runtime lifecycle, skill discovery, and age
 ### Official Release Baseline
 The nearest reachable upstream official release tag a self-hosted build is based on, verified against the canonical upstream release tags at build time. It is embedded into the backend binary or frontend bundle at build time and is intentionally distinct from the checkout's exact commit, dirty state, image tag, and deployment configuration. A build whose baseline cannot be derived and verified against the upstream tags—or explicitly trusted by the operator—must not claim one.
 
+Resolved on the host by `scripts/resolve-official-baseline.sh`, which verifies the candidate against the canonical upstream (`https://github.com/multica-ai/multica`) via `git ls-remote`. The single canonical-upstream URL constant lives in that script — a heavily-forked deployment that tracks a different upstream should retarget it in one place.
+
 ---
 
 ## Status Concepts
