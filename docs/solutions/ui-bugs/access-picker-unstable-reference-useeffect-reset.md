@@ -1,6 +1,7 @@
 ---
 title: "AccessPicker draft resets on every render when passed unstable invocationTargets={[]}"
 date: 2026-07-14
+last_updated: 2026-07-16
 category: ui-bugs
 module: "packages/views/agents"
 problem_type: logic_error
@@ -16,6 +17,8 @@ tags: [react-hooks, useEffect, useRef, unstable-reference, access-picker, bulk-d
 ---
 
 # AccessPicker draft resets on every render when passed unstable invocationTargets={[]}
+
+> **Status (2026-07-16): Upstream-adopted.** PR [#5393](https://github.com/multica-ai/multica/pull/5393) is now MERGED upstream, and its `packages/views/agents/components/inspector/access-picker.tsx` uses the same `onChange` callback + `invocationTargets: AgentInvocationTarget[] | undefined` shape this doc recommends (subsuming the local Fix 1–4 trail — forwardRef→onChange, draft reset, bulk-dialog responsiveness). Self-host instances on v0.4.2+ consume upstream's version; see `workflow-issues/safe-upstream-upgrade-with-local-customizations.md` Step 4.5. The prevention rules below remain valid and now live upstream too.
 
 ## Problem
 

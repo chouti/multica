@@ -1,6 +1,7 @@
 ---
 title: "How to safely upgrade a self-hosted Multica instance with local customizations to a new upstream release"
 date: 2026-07-10
+last_updated: 2026-07-16
 category: "workflow-issues"
 module: "git"
 problem_type: "workflow_issue"
@@ -108,6 +109,27 @@ type Config struct {
 
 For `readonly-content.test.tsx`, the merge kept upstream's refactored test structure and appended the local admin-specific test cases. For `workspace.sql`, accept upstream's `DELETE` syntax improvement while preserving local admin queries.
 
+**Strategy D — Orthogonal function-signature merge.** Local and upstream may each extend the same function's signature along independent axes (e.g. local adds a parameter, upstream adds a return value). Preserve both — the merged signature is the union, not either-or. Picking either side drops one set of functionality.
+
+Canonical example: `triggerTasksForComment` in `server/internal/handler/comment.go` — local added a `skillMentionAgents map[string]pgtype.UUID` parameter (#5346, skill mention registry), upstream changed the return type from `error` to `[]CommentTriggerOutcome` (MUL-4525, partial-success response). The merged signature keeps both. Three call sites had to be adapted: pass the new arg AND assign the new return; a closure whose surrounding type now returns outcomes must `return` the call — a missing `return` compiles as a void body, with the type mismatch surfacing only when the closure is invoked downstream (not at `go build`). When NOT to apply: if both sides wanted to occupy the same parameter slot, this is a real conflict requiring a manual merge at that argument, not the orthogonal pattern.
+
+### Step 4.5 — When your local PR was adopted upstream
+
+Before the merge, audit your open local PRs against upstream:
+
+```bash
+gh pr list --repo multica-ai/multica --author <your-handle> --state all --limit 50
+```
+
+Any `MERGED` entry between your last sync and the new release means upstream shipped a version of your change. For those files, take upstream verbatim rather than porting your local commit on top:
+
+```bash
+gh pr view <num> --repo multica-ai/multica --json files --jq -r '.files[].path' | \
+  xargs git checkout <tag> --
+```
+
+Then verify behavioural equivalence against your local fix's purpose (`git diff <tag>..HEAD -- <path>` should show only deliberate deltas, not redundant fix-trail). Drop the local fix commits; upstream's version often implements them in a cleaner form. Worked case from the v0.3.43 → v0.4.2 upgrade: PR #5393 (`feat(agents): add access-scope column, filter, and bulk edit to agents list`, MERGED 2026-07-14, 22 files) — upstream's `packages/views/agents/components/inspector/access-picker.tsx` uses `onChange` callbacks with `invocationTargets: AgentInvocationTarget[] | undefined`, which subsumes the three local AccessPicker follow-up fix commits on the fork (forwardRef→onChange, draft reset, bulk-dialog responsiveness) that had moved off `forwardRef`+`ref.commit`. No port needed. Skip this step if upstream's merge reverted behaviour you depend on, or if your local PR had follow-up commits that still need to land on top of upstream's version.
+
 ### Step 5: Adapt local features to upstream API changes
 
 After resolving conflicts, local features that depended on refactored upstream APIs must be updated. This is critical: **adapt your local code to the new upstream API, not the other way around.**
@@ -170,6 +192,16 @@ pnpm build
 
 If any step fails, fix the issue before proceeding. The typecheck step will catch cases where local features still reference removed upstream APIs. The migrate step catches schema drift that would otherwise surface as 500s on endpoints whose queries reference new columns.
 
+**7.5 — Pre-existing test failure disambiguation.** If a post-merge test fails, classify whether the merge introduced it before treating it as a regression:
+
+```bash
+git checkout main-backup-<version> -- <source-file>
+# keep <test-file> at HEAD (post-merge)
+pnpm test <test-file>
+```
+
+Still failing with the backup source → the failure is **pre-existing** in your local base (the test was already broken; the merge just surfaced it because you ran the full suite). Pass with backup source + fails with post-merge → **merge-introduced**, port or adapt. Apply per test file, not globally — the source-swap procedure partitions failures into the two buckets in seconds without a full rebase. Worked case: `packages/views/skills/components/runtime-local-skill-import-panel.test.tsx` had 5 failures attributable to the local base (#5160 adaptive skill discovery was never implemented — no `data-branch` attribute), while 4 other failures in `issue-detail.test.tsx` were genuine merge artifacts (official #5403 render overhaul doubled-rendered the issue title across the breadcrumb leaf + main header). Limitation: if the test file itself was modified by the merge, source-only checkout does not isolate the variable — copy the backup test to a scratch path and rerun with both source versions.
+
 ### Step 8: Restart services and verify
 
 ```bash
@@ -209,6 +241,13 @@ Post-merge: pnpm install, typecheck, tests, build all pass.
 EOF
 )"
 ```
+
+## Tool-environment caveat — Bash cwd drift
+
+The Bash tool's working directory persists across calls. A `cd server && go build` at the start of one turn leaves cwd at `server/` for every subsequent turn, so a later `grep server/pkg/db` resolves to `server/server/pkg/db` (empty) instead of `/Users/fengzhao/multica/server/pkg/db`. Two reliable mitigations across the whole Guidance section:
+
+- **Absolute paths everywhere**: `grep -rn … /Users/fengzhao/multica/server/cmd/migrate/main.go`, `go build -C /Users/fengzhao/multica/server ./...`.
+- **The `-C` flag** (Go 1.20+) on `go build` / `go test` / `go run` does not change cwd and works regardless of how cwd drifted earlier turns — preferred when chaining git/build/test across turns in agentic workflows.
 
 ## Why This Matters
 

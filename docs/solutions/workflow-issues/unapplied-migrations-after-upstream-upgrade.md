@@ -64,6 +64,20 @@ cd server && DATABASE_URL="postgres://fengzhao@localhost:5433/multica?sslmode=di
 
 `cmd/migrate` reads `DATABASE_URL` and falls back to `postgres://multica:multica@localhost:5432/multica` (`server/cmd/migrate/main.go:120`). On a self-hosted instance whose DB is on a non-default port/user, **you must export `DATABASE_URL`** or the tool connects to the wrong (or nonexistent) database and "migrations ran fine" masks that nothing happened.
 
+### 1a. Predict migration number collisions before merge
+
+Before the merge, audit the migration number ranges on both sides so you can predict a version-collision or migrator-side abort *before* the merge completes — not only after `migrate up` aborts:
+
+```bash
+MERGE_BASE=$(git merge-base main <release-tag>)   # e.g. v0.4.2
+# upstream migrations added since last sync
+git diff --name-status $MERGE_BASE <release-tag> -- server/migrations/ | grep '^A'
+# local-only migrations added since last sync
+git diff --name-status $MERGE_BASE main -- server/migrations/ | grep '^A'
+```
+
+The migrator's `version` PRIMARY KEY is the **full filename stem** (`server/cmd/migrate/main.go:235` → `server/internal/migrations/migrations.go:94-100`, `base := strings.TrimSuffix(base, ".up.sql")`), not just the numeric prefix. So `158_backfill_comment_source_task_id.up.sql` produces a different key from `158_agent_task_queue_chat_input_task_id.up.sql` — same number, different name, both rows apply. A number collision is only a real collision when both sides pick the same full stem, which the `git diff` above surfaces directly. Worked case from the v0.3.43→v0.4.2 upgrade: 3 local `158/159/160` files collided by number with 3 upstream files of the same number, all 6 applied cleanly (no reshuffle, no abort). For the upstream-rename of an applied migration (a *true* reshuffle), keep using the post-merge guidance below — that failure mode is the original subject of this doc.
+
 ### 2. Detect unapplied migrations
 
 ```bash

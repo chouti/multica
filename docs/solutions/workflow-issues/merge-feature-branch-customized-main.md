@@ -59,6 +59,15 @@ git checkout --theirs packages/ui/components/common/actor-mention-chip.tsx ...
 # For additive imports (both sides added different imports):
 # Edit manually to keep both imports
 
+# For orthogonal function-signature conflicts (both sides extended the same
+# exported function along independent axes — e.g. one branch adds a parameter,
+# the other changes the return type), do NOT pick --theirs or --ours: merge
+# both deltas into one signature and adapt every call site. See the v0.3.43→
+# v0.4.2 worked case in workflow-issues/safe-upstream-upgrade-with-local-customizations.md
+# (Strategy D, comment.go's triggerTasksForComment — local added skillMentionAgents
+# param, upstream changed return type to []CommentTriggerOutcome; merged signature
+# kept both, three call sites adapted).
+
 # Stage resolved files:
 git add <resolved-files>
 git commit --no-edit
