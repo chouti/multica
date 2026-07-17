@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"net/netip"
 	"os"
-	"regexp"
 	"strings"
 	"time"
 
@@ -129,38 +128,6 @@ func parseTrustedProxies(raw string) []netip.Prefix {
 		out = append(out, p)
 	}
 	return out
-}
-
-// officialBaseline returns v only when it is a trustworthy official release
-// baseline: a clean vX.Y.Z-style tag carrying no git-describe commit-distance
-// suffix (-N-g<hash>) or dirty marker. The supported self-host build paths
-// (scripts/resolve-official-baseline.sh, release CI) stamp exactly such a tag
-// via -X main.version; dev builds (the "dev" default), dirty checkouts, and
-// anything that is not a clean official tag map to "". handler.Config.ServerVersion
-// feeds /api/config's server_version field with omitempty, so an empty value
-// hides the Help popover's version row instead of presenting a hash, a dirty
-// suffix, or "dev" as a release baseline.
-var describeSuffixRe = regexp.MustCompile(`-\d+-g[0-9a-f]{4,}$`)
-
-func officialBaseline(v string) string {
-	v = strings.TrimSpace(v)
-	if v == "" || v == "dev" {
-		return ""
-	}
-	if !isOfficialBaselineTag(v) {
-		return ""
-	}
-	return v
-}
-
-func isOfficialBaselineTag(v string) bool {
-	if len(v) < 2 || v[0] != 'v' || v[1] < '0' || v[1] > '9' {
-		return false
-	}
-	if strings.Contains(v, "-dirty") || describeSuffixRe.MatchString(v) {
-		return false
-	}
-	return true
 }
 
 // NewRouter creates the fully-configured Chi router with all middleware and routes.
