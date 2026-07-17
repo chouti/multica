@@ -121,7 +121,7 @@ func (q *Queries) GetSkill(ctx context.Context, id pgtype.UUID) (Skill, error) {
 	return i, err
 }
 
-const getAgentSkillEnabled = `-- name: UpsertAgentSkillEnabled :execrows
+const upsertAgentSkillEnabled = `-- name: UpsertAgentSkillEnabled :execrows
 INSERT INTO agent_skill (agent_id, skill_id, enabled)
 VALUES ($1, $2, TRUE)
 ON CONFLICT (agent_id, skill_id) DO UPDATE SET enabled = TRUE
@@ -139,7 +139,7 @@ type UpsertAgentSkillEnabledParams struct {
 // else insert / else update` branching — that branching is no longer
 // needed because the upsert handles all three cases atomically.
 func (q *Queries) UpsertAgentSkillEnabled(ctx context.Context, arg UpsertAgentSkillEnabledParams) (int64, error) {
-	result, err := q.db.Exec(ctx, getAgentSkillEnabled, arg.AgentID, arg.SkillID)
+	result, err := q.db.Exec(ctx, upsertAgentSkillEnabled, arg.AgentID, arg.SkillID)
 	if err != nil {
 		return 0, err
 	}

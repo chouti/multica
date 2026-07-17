@@ -1702,22 +1702,17 @@ type skillBindingsMap = map[string][]pgtype.UUID
 // deduped out) is never bound, eliminating the "bind-without-run weapon"
 // (review finding #4). Multiple skills per agent are all bound.
 //
-// Two cases per (agent, skill) pair:
-//   - no row exists -> AddAgentSkill inserts an enabled=TRUE row.
-//   - row exists but disabled -> SetAgentSkillEnabled flips it to true.
-//   - row exists and enabled -> no-op.
+// Uses a single SQL upsert (UpsertAgentSkillEnabled, INSERT ... ON CONFLICT
+// DO UPDATE SET enabled=TRUE) that converges on enabled=TRUE regardless of
+// prior row state (missing / disabled / already-enabled), eliminating the
+// TOCTOU window that the prior GetAgentSkillEnabled + AddAgentSkill split
+// had (reliability re-review finding).
 //
 // Per-agent bind failure (DB blip, etc.) is logged with the agent id and
 // skill id, then looped over so a single failure does not strand
 // remaining agents unbound-and-enqueued. The user-facing outcome remains
 // "queued" for the agent (the run starts); the bind is a durable
 // side-effect for future runs and the next comment retries it.
-//
-// Uses a single SQL upsert (UpsertAgentSkillEnabled, INSERT ... ON CONFLICT
-// DO UPDATE SET enabled=TRUE) so the prior TOCTOU window (reliability
-// re-review finding) where GetAgentSkillEnabled + AddAgentSkill were two
-// separate statements is closed. The upsert converges on enabled=TRUE
-// regardless of prior state, regardless of concurrent writers.
 func (h *Handler) bindDesignatedSkillsForTriggers(ctx context.Context, triggers []commentAgentTrigger, skillBindings skillBindingsMap, issue db.Issue) {
 	for _, t := range triggers {
 		if t.Source != commentTriggerSourceMentionSkill {
@@ -2751,8 +2746,9 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 	// here instead of leaking into the retrigger path (mirror CreateComment at
 	// comment.go:1333). The parsed map is forwarded to the retrigger so the
 	// edit path binds + enqueues for any @skill designation the client sets.
-	// AddAgentSkill is idempotent (ON CONFLICT DO NOTHING) so re-binding on edit
-	// is a safe no-op, and idx_one_pending_task_per_issue_agent dedupes the
+	// UpsertAgentSkillEnabled (ON CONFLICT DO UPDATE SET enabled=TRUE) is
+	// idempotent so re-binding on edit converges to enabled=TRUE regardless
+	// of prior state, and idx_one_pending_task_per_issue_agent dedupes the
 	// trigger against any in-flight run.
 	skillAgents, ok := parseSkillMentionAgents(w, req.SkillMentionAgents, "skill_mention_agents")
 	if !ok {
