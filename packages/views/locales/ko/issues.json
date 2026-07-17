@@ -307,6 +307,8 @@
     "trigger_source_issue_assignee": "담당자",
     "trigger_source_mention_agent": "@멘션",
     "trigger_source_mention_squad_leader": "Squad",
+    "trigger_source_mention_skill": "skill 멘션",
+    "trigger_source_thread_parent": "답글",
     "trigger_source_unknown": "트리거",
     "trigger_skipped_label": "건너뜀",
     "trigger_wont_trigger": "이번에는 시작하지 않습니다",

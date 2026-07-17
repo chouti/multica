@@ -9,12 +9,12 @@ a pointer.
 | Fact | Source |
 | --- | --- |
 | `MentionRe` — the only recognizer of a mention link | `server/internal/util/mention.go:16` |
-| Pattern: `` `\[@?(.+?)\]\(mention://(member\|agent\|squad\|issue\|all)/([0-9a-fA-F-]+\|all)\)` `` | `server/internal/util/mention.go:16` |
-| `<type>` group = `member \| agent \| squad \| issue \| all` | `server/internal/util/mention.go:16` |
-| `<id>` group = `[0-9a-fA-F-]+` (hex + dashes) **or** the literal `all` — so a typical name with non-hex letters never matches | `server/internal/util/mention.go:16` |
-| `ParseMentions` extracts and dedups `{Type, ID}` from `m[2]`/`m[3]` | `server/internal/util/mention.go:24-37` |
-| `Mention.Type` doc enum = "member", "agent", "issue", or "all" (squad added in regex) | `server/internal/util/mention.go:7` |
-| `HasMentionAll` reports whether any parsed mention is `all` | `server/internal/util/mention.go:40-47` |
+| Pattern: `` `\[@?(.+?)\]\(mention://(member\|agent\|squad\|issue\|skill\|project\|all)/([0-9a-fA-F-]+\|all)\)` `` (regex built from `ValidMentionTypes`) | `server/internal/util/mention.go:14-22,41-46` |
+| `<type>` group = `member \| agent \| squad \| issue \| skill \| project \| all` (joined from `ValidMentionTypes`) | `server/internal/util/mention.go:14-22` |
+| `<id>` group = `[0-9a-fA-F-]+` (hex + dashes) **or** the literal `all` — so a typical name with non-hex letters never matches | `server/internal/util/mention.go:43` |
+| `ParseMentions` extracts and dedups `{Type, ID}` from `m[2]`/`m[3]` | `server/internal/util/mention.go:54-67` |
+| `Mention.Type` doc enum = "member", "agent", "issue", "skill", "project", or "all" (squad added in regex; skill + project added via `ValidMentionTypes`) | `server/internal/util/mention.go:24-31` |
+| `HasMentionAll` reports whether any parsed mention is `all` | `server/internal/util/mention.go:69-77` |
 
 ### Parser behavior tests (pin the example shapes the skill uses)
 
@@ -40,6 +40,29 @@ a pointer.
 | `agent` branch: load agent in workspace, then add the agent trigger | `server/internal/handler/comment.go:1440-1464` |
 | `agent` → shared enqueue helper calls `EnqueueTaskForMention` (a run for that agent) | `server/internal/handler/comment.go:1148-1154` |
 | **`member` and `issue` mentions reach neither branch — they enqueue NOTHING.** A `member` mention fails the `!= "agent"` skip at lines 1437-1439 (the squad branch above it only matches `squad`); an `issue` mention does the same. | `server/internal/handler/comment.go:1397,1437-1439` |
+
+## @skill mention routing (explicit designation, NOT reverse-lookup)
+
+Unlike `agent`/`squad`, the mention `[@Bot](mention://skill/<skill-id>)` does
+not pick a runner from the link alone. The composer must supply a non-empty
+`skill_mention_agents` map alongside the request; the backend durably binds
+each designated agent to the skill (idempotent) and enqueues it.
+
+| Fact | Source |
+| --- | --- |
+| `CreateCommentRequest` accepts optional `skill_mention_agents` (map of skill id → agent ids) | `server/internal/handler/comment.go:999-1006` |
+| `UpdateComment` accepts optional `skill_mention_agents` (same shape) | `server/internal/handler/comment.go:1013-1017` |
+| `triggerTasksForComment` is the create-time entry point that computes implicit triggers AND calls `bindAndEnqueueSkillMentions` for the designated agents, then enqueues the merged set | `server/internal/handler/comment.go:1486-1509` |
+| `bindAndEnqueueSkillMentions` is the create-only path that binds each designated agent to the skill and emits one trigger + target per agent; a skill mention with no designation is a silent no-op (length check + empty-list skip) | `server/internal/handler/comment.go:1511-1626` |
+| Designated-agent gates mirror direct `@agent`: invocable (`canInvokeAgent`), not archived, runtime present, no already-pending task | `server/internal/handler/comment.go:1587-1620` |
+| Durable skill→agent bind is `AddAgentSkill` (idempotent ON CONFLICT DO NOTHING); `agentHasSkillEnabled` skips the write when an enabled binding already exists | `server/internal/handler/comment.go:1600-1614,1628-1641` |
+| The shared pending-task helper (`hasPendingTaskForIssueAndAgent`) collapses a designated agent already selected by an implicit path (assignee / reply-parent) so no agent double-fires | `server/internal/handler/comment.go:1616-1620` |
+| Preview route accepts `skill_mention_agents` for shape validation but parses-and-discards — the read-only preview NEVER binds or triggers a skill | `server/internal/handler/comment.go:1152-1175` |
+| `commentTriggerSourceMentionSkill` is the source label returned on a chip when the user explicitly designated the agent via `skill_mention_agents` | `server/internal/handler/comment.go:1048` |
+| `commentTriggerSourceMentionSkill` reason string returned alongside the source on the preview/response payload | `server/internal/handler/comment.go:1131-1132` |
+| `commentTriggerSourceThreadParent` source label for reply-parent triggers | `server/internal/handler/comment.go:1049,1133-1134` |
+| Frontend trigger-chip label switches for `mention_skill` and `thread_parent` (so chips don't fall through to the unknown-source "trigger" label) | `packages/views/issues/components/comment-trigger-chips.tsx:51-78` |
+| i18n keys `trigger_source_mention_skill` and `trigger_source_thread_parent` (en/zh-Hans/ja/ko parity) | `packages/views/locales/en/issues.json:316-321`, `packages/views/locales/zh-Hans/issues.json:307-312`, `packages/views/locales/ja/issues.json:307-312`, `packages/views/locales/ko/issues.json:307-312` |
 
 ## Preview and suppression
 
@@ -121,5 +144,21 @@ branches only on `squad` and `agent`
 `notif` returns only an unrelated comment about avoiding "log spam" on
 unchanged threads — no member-notification call. The verified contract is
 narrow: a `member` or `issue` mention renders as a link and enqueues no agent
-run; only `agent` and `squad` mentions enqueue work. If a notification UX
-exists, it is not in this handler, so this skill makes no claim about it.
+run; only `agent` and `squad` mentions enqueue work on their own; `skill`
+mentions enqueue work ONLY when accompanied by a non-empty
+`skill_mention_agents` entry for that skill id (see the @skill routing
+section above). If a notification UX exists, it is not in this handler, so
+this skill makes no claim about it.
+
+## Explicit non-claim: no reverse-lookup of agent↔skill bindings for @skill mentions
+
+The skill deliberately does **not** assert that a `@skill` mention will
+"auto-trigger an agent that has the skill bound." Pre-U1 behavior
+(`resolveSkillMentionTrigger` in
+`server/internal/handler/skill_mention_trigger_test.go` history) used the
+binding table to pick a target, but that path is gone. The verified contract
+is: the composer explicitly designates agents via `skill_mention_agents`, and
+the backend binds + enqueues exactly those agents. A bare `@skill` mention
+without a designation is the silent-no-op case documented in
+`SKILL.md` Step 2 — the parser still matches, the link still renders, no run
+is enqueued.

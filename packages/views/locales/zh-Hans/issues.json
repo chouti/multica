@@ -307,6 +307,8 @@
     "trigger_source_issue_assignee": "assignee",
     "trigger_source_mention_agent": "@mention",
     "trigger_source_mention_squad_leader": "squad",
+    "trigger_source_mention_skill": "skill 提及",
+    "trigger_source_thread_parent": "回复",
     "trigger_source_unknown": "将触发",
     "trigger_skipped_label": "已跳过",
     "trigger_wont_trigger": "本次不会开始",

@@ -1,6 +1,6 @@
 ---
 name: multica-mentioning
-description: "Use when an issue comment needs to @mention someone — link to a person, trigger another agent, hand work to a squad, or broadcast with @all. Documents the verified mention contract: how a mention link is built from a real UUID, the four mention types and exactly what each one enqueues (agent → a run for that agent, squad → a run for the squad leader, member and issue → a rendered link with NO run), comment create/edit preview and suppression, the @all broadcast and how it suppresses the assignee's auto-trigger, and the silent no-op cases (a name where a UUID belongs, a bad/unknown UUID, an already-pending task, an archived agent, a private agent you cannot access). WHETHER to mention — loop avoidance, staying silent on acknowledgements — lives in the runtime brief's Mentions section, not here. This skill is the backend contract only, traced to server/internal/util/mention.go and server/internal/handler/comment.go."
+description: "Use when an issue comment needs to @mention someone — link to a person, trigger another agent, hand work to a squad, broadcast with @all, or designate an agent via @skill. Documents the verified mention contract: how a mention link is built from a real UUID, the five mention types and exactly what each one enqueues (agent → a run for that agent, squad → a run for the squad leader, member and issue → a rendered link with NO run, skill → a run ONLY for agents the frontend EXPLICITLY designated in `skill_mention_agents`; undesignated skill mention = silent no-op), comment preview/suppression, the @all broadcast and assignee-trigger suppression, and the silent no-op cases (bad name, bad UUID, undesignated @skill, already-pending, archived, inaccessible). This skill is the backend contract only, traced to server/internal/util/mention.go and server/internal/handler/comment.go."
 user-invocable: false
 allowed-tools: Bash(multica *)
 ---
@@ -23,14 +23,27 @@ The backend recognizes a mention only through this Markdown shape:
     [@Label](mention://<type>/<id>)
 
 The parser (`util.MentionRe` in `server/internal/util/mention.go`) accepts
-exactly four `<type>` values plus the `all` sentinel, and the `<id>` group
-accepts only hex characters and dashes, OR the literal string `all`:
+six `<type>` values (the `all` type doubles as its own sentinel — the id must
+also be the literal `all`), and the `<id>` group accepts only hex characters
+and dashes, OR the literal string `all`:
 
-    (member|agent|squad|issue|all)/([0-9a-fA-F-]+|all)
+    (member|agent|squad|issue|skill|project|all)/([0-9a-fA-F-]+|all)
 
 So the link target is a real entity UUID (or `all`), never a display name. The
 label between the brackets is free text — that is where the human-readable name
-goes.
+goes. This document teaches the types that enqueue or link people — `agent`,
+`squad`, `member`, `issue`, and `skill` — plus the `@all` broadcast. `project`
+is a recognized mention type but is out of scope here (see the projects
+skill).
+
+Note: `skill` is a recognized mention TYPE for routing and silent no-ops, but
+unlike the others a bare `@skill` mention does NOT auto-route to an agent —
+it fires ONLY when the composer also passes a non-empty designation list for
+that skill id (see Step 2). Without a designation the parser still matches,
+the mention renders, and the backend does nothing with it. This is the same
+silent contract a `member` mention uses, but for a different reason: members
+never had a runner, while skill mentions ARE routed to agents — just not by
+the backend inferring one from a binding table.
 
 ## Step 1 — look up the UUID with `--output json`
 
@@ -45,10 +58,14 @@ backend's own roster formatter uses `user_id` for member mentions. Match by
 display name. If the name is ambiguous or absent, do not guess — say so in your
 comment instead of emitting a broken link.
 
-## Step 2 — the four types and exactly what each enqueues
+## Step 2 — the five actionable types and exactly what each enqueues
 
 Format: `[@Name](mention://<type>/<uuid>)`. The `<type>` and the id source must
-match, or the link resolves to the wrong entity (or to nothing).
+match, or the link resolves to the wrong entity (or to nothing). This table
+covers the five types a comment can use to enqueue work or link an entity
+(`agent`, `squad`, `member`, `issue`, `skill`); `@all` is a special broadcast
+sentinel covered below, and `project` is a recognized mention type but is
+out of scope here.
 
 | To…                  | type     | uuid from       | What the backend does                                    |
 | -------------------- | -------- | --------------- | -------------------------------------------------------- |
@@ -56,6 +73,7 @@ match, or the link resolves to the wrong entity (or to nothing).
 | hand work to a squad | `squad`  | squad.id        | resolves the squad's `leader_id` and enqueues a run for the LEADER agent |
 | link a person        | `member` | member.user_id  | renders a link; enqueues NOTHING — no agent run          |
 | reference an issue   | `issue`  | issue.id        | renders a link; enqueues NOTHING — always safe           |
+| designate an agent   | `skill`  | skill.id        | renders a link; enqueues a run ONLY for each agent the frontend explicitly designated via `skill_mention_agents` (see Step 3). An undesignated skill mention is a silent no-op — the same shape as `member`, but the failure mode is "no designation supplied", not "the type has no runner". |
 
 The mention trigger set is computed by `computeMentionedAgentCommentTriggers`
 (`server/internal/handler/comment.go`); the comment path folds that result into
@@ -63,12 +81,53 @@ The mention trigger set is computed by `computeMentionedAgentCommentTriggers`
 It acts on two types only: the `squad` branch resolves the squad and adds its
 leader to the trigger set; everything that is not `agent` after that is skipped
 (`if m.Type != "agent" { continue }`), then the `agent` branch adds that agent.
-A `member` or `issue` mention reaches neither branch, so it enqueues no task.
+A `member`, `issue`, or undesignated `skill` mention reaches neither branch, so
+it enqueues no task.
 
-A `member` mention therefore does NOT make a person "run", and this skill does
-NOT claim it delivers a notification through the Go comment handler — there is
-no such code path in that handler (see the source map). What is verified is the
-contract above: only `agent` and `squad` mentions enqueue work.
+A `member` or `issue` mention therefore does NOT make a person "run", and this
+skill does NOT claim it delivers a notification through the Go comment handler
+— there is no such code path in that handler (see the source map). What is
+verified is the narrow contract above: only `agent` and `squad` mentions enqueue
+work on their own, and `skill` mentions enqueue work ONLY when accompanied by
+a non-empty `skill_mention_agents` entry for that skill id.
+
+## Step 3 — @skill mentions are EXPLICITLY designated, never reverse-looked-up
+
+Unlike `agent` / `squad`, an `@skill` mention does NOT carry enough information
+in the link itself to pick a runner — the skill has a skill_id, not an agent_id.
+The backend therefore relies on the composer to name the agent(s) for every
+skill mention in the comment.
+
+The composer carries that map as `skill_mention_agents` (keyed by the skill id
+in the mention link, valued as the list of agent ids the user picked from the
+skill's chip UI). It is wired through create/edit comment requests and lands in
+`bindAndEnqueueSkillMentions` (`server/internal/handler/comment.go`), which is
+called ONLY from the create-time path — never from the read-only trigger
+preview, since binding is a side effect.
+
+For each `[@skill](mention://skill/<id>)` in the comment body:
+
+- If the request body's `skill_mention_agents[<id>]` is missing or empty, the
+  mention is dropped silently — same shape as an undesignated member mention
+  in the parser. The link still renders, nothing fires.
+- If the request body's `skill_mention_agents[<id>]` names one or more agents,
+  the backend durably binds each designated agent to the skill via
+  `AddAgentSkill` (idempotent — repeat binds are a no-op), then enqueues each
+  through the shared trigger pipeline. References and scripts reach the agent
+  via the existing bound-skill path with no new delivery plumbing.
+- Each designated agent runs through the same gates as a direct `@agent`
+  mention: invocable, unarchived, runtime present, no already-pending task on
+  this issue. A gate failure reports `invocation_not_allowed`,
+  `target_unavailable`, `runtime_offline`, or `internal_error` as a per-agent
+  outcome — it never aborts the other designations.
+- An implicit path (assignee, reply-parent) that already selected the same
+  agent collapses with the skill designation via the shared pending-task helper;
+  no agent double-fires from one comment.
+
+CLI does not currently expose a way to author a `skill_mention_agents` map —
+that is a composer-only gesture. When it eventually lands, the value must be
+the agent's `id` from `multica agent list --output json` (the same field the
+direct `@agent` mention uses).
 
 ## Preview and per-comment suppression
 
@@ -114,6 +173,14 @@ These are all silent no-ops — no error, no run:
   DOES parse, then no-ops at lookup: the workspace-scoped query finds no agent
   and the loop `continue`s. Same agent-visible result (nothing fires), but the
   mechanism is the lookup miss, not a parse failure.
+- **An undesignated `@skill` mention.** A `[@Bot](mention://skill/<id>)` with
+  no entry (or an empty list) in `skill_mention_agents` for that skill id is
+  dropped silently — the parser matched, the link renders, no run is enqueued.
+  This is the same shape as a `member` mention, but the cause is "no
+  designation supplied", not "skill has no runner" — the skill DOES have
+  runners, they just weren't named for this comment. So this is the only
+  silent no-op a `@skill` mention can produce, and it is by design: the
+  backend never reverse-looks-up the binding table to guess an agent.
 - **An already-pending task.** Even a correct `@agent`/`@squad` is skipped when
   the target already has a pending task on this issue
   (`HasPendingTaskForIssueAndAgent` → `continue`). Edit preview is the only

@@ -56,6 +56,13 @@ function sourceLabel(source: string, t: IssuesT): string {
       return t(($) => $.comment.trigger_source_mention_agent);
     case "mention_squad_leader":
       return t(($) => $.comment.trigger_source_mention_squad_leader);
+    // U1: skill mentions are bound to their designated agent on submit. The
+    // chip must say WHY this agent was picked, not fall through to "trigger".
+    case "mention_skill":
+      return t(($) => $.comment.trigger_source_mention_skill);
+    // Reply-parent: the agent owns the comment being replied to.
+    case "thread_parent":
+      return t(($) => $.comment.trigger_source_thread_parent);
     default:
       return t(($) => $.comment.trigger_source_unknown);
   }
@@ -72,6 +79,13 @@ function sourceReason(agent: CommentTriggerPreviewAgent, t: IssuesT): string | n
       return null;
     case "mention_squad_leader":
       return t(($) => $.comment.trigger_reason_mention_squad_leader);
+    // Skill + reply-parent reasons come from the backend verbatim
+    // (commentAgentTriggerReason in comment.go) so they stay consistent with
+    // the source map. Return null here so the chip doesn't repeat them — the
+    // source label already says WHY the agent was picked.
+    case "mention_skill":
+    case "thread_parent":
+      return null;
     default:
       return agent.reason || t(($) => $.comment.trigger_reason_unknown);
   }

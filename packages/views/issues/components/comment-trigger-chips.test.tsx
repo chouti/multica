@@ -30,6 +30,26 @@ const bob: CommentTriggerPreviewAgent = {
   reason: "",
 };
 
+// U1: skill mentions route via explicit designation
+// (server/internal/handler/comment.go: bindAndEnqueueSkillMentions). The chip
+// must surface WHY this agent was picked — without an explicit label the user
+// would see "trigger", which is the unknown-source fallback and a lie.
+const skillDesignee: CommentTriggerPreviewAgent = {
+  id: "agent-3",
+  name: "Gus",
+  source: "mention_skill",
+  reason: "A skill mention designated this agent.",
+};
+
+// Reply-parent: the agent owns the parent comment. Distinct from a fresh
+// @mention because the source is "they posted the comment you're replying to".
+const threadReply: CommentTriggerPreviewAgent = {
+  id: "agent-4",
+  name: "Hank",
+  source: "thread_parent",
+  reason: "This reply will trigger the parent comment's author.",
+};
+
 describe("CommentTriggerChips", () => {
   it("renders nothing without agents", () => {
     const { container } = renderWithI18n(
@@ -186,5 +206,61 @@ describe("CommentTriggerChips", () => {
     expect(screen.getByText("No permission")).toBeInTheDocument();
     expect(screen.getByText("Ops")).toBeInTheDocument();
     expect(screen.getByText("Runtime offline")).toBeInTheDocument();
+  });
+
+  // U1: a skill-designated agent must show WHY it was picked. Without the
+  // explicit case the chip falls through to "trigger" (the unknown-source
+  // label), which is a lie for a real, designated agent. The single-chip
+  // visible surface is just the sentence ("Will start when sent") — the
+  // source label lives in the tooltip aria-label, which we assert here.
+  it("labels a mention_skill trigger with its dedicated source tag", () => {
+    renderWithI18n(
+      <CommentTriggerChips
+        agents={[skillDesignee]}
+        suppressedAgentIds={new Set()}
+        onToggle={vi.fn()}
+      />,
+    );
+
+    const chip = screen.getByRole("button", { name: /Gus/ });
+    expect(chip.getAttribute("aria-label")).toContain("skill mention");
+    // Must not fall through to the generic unknown-source fallback. The
+    // fallback label is the single word "trigger" with no qualifier.
+    expect(chip.getAttribute("aria-label")).not.toContain("trigger: trigger");
+  });
+
+  // Reply-parent is distinct from a fresh @mention: the trigger fires because
+  // the user is replying to that agent's comment, not because they typed its
+  // mention markup. A generic "trigger" label would erase that signal.
+  it("labels a thread_parent trigger as a reply", () => {
+    renderWithI18n(
+      <CommentTriggerChips
+        agents={[threadReply]}
+        suppressedAgentIds={new Set()}
+        onToggle={vi.fn()}
+      />,
+    );
+
+    const chip = screen.getByRole("button", { name: /Hank/ });
+    expect(chip.getAttribute("aria-label")).toContain("reply");
+  });
+
+  // The new sources must work in the multi-agent stack too, so a comment that
+  // triggers three agents for three different reasons still distinguishes them
+  // in the popover rows (one label per source).
+  it("distinguishes mention_skill and thread_parent in the multi-agent popover", () => {
+    renderWithI18n(
+      <CommentTriggerChips
+        agents={[walt, skillDesignee, threadReply]}
+        suppressedAgentIds={new Set()}
+        onToggle={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button"));
+    // The popover renders each agent's source as the trailing label.
+    expect(screen.getByText("assignee")).toBeInTheDocument();
+    expect(screen.getByText("skill mention")).toBeInTheDocument();
+    expect(screen.getByText("reply")).toBeInTheDocument();
   });
 });

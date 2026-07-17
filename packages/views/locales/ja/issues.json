@@ -307,6 +307,8 @@
     "trigger_source_issue_assignee": "担当",
     "trigger_source_mention_agent": "@メンション",
     "trigger_source_mention_squad_leader": "Squad",
+    "trigger_source_mention_skill": "skillメンション",
+    "trigger_source_thread_parent": "返信",
     "trigger_source_unknown": "トリガー",
     "trigger_skipped_label": "スキップ",
     "trigger_wont_trigger": "今回は開始しません",

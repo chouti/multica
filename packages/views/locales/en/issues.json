@@ -316,6 +316,8 @@
     "trigger_source_issue_assignee": "assignee",
     "trigger_source_mention_agent": "@mention",
     "trigger_source_mention_squad_leader": "squad",
+    "trigger_source_mention_skill": "skill mention",
+    "trigger_source_thread_parent": "reply",
     "trigger_source_unknown": "trigger",
     "trigger_skipped_label": "Skipped",
     "trigger_wont_trigger": "Won't start this time",
