@@ -302,10 +302,10 @@ export function useIssueTimeline(issueId: string, userId?: string) {
   // on success — so a slow send no longer leaves the box full next to an
   // already-posted comment, and a failed send keeps the draft.
   const submitComment = useCallback(
-    async (content: string, attachmentIds?: string[], suppressAgentIds?: string[]): Promise<boolean> => {
+    async (content: string, attachmentIds?: string[], suppressAgentIds?: string[], skillMentionAgents?: Record<string, string[]>): Promise<boolean> => {
       if (!content.trim() || !userId) return false;
       try {
-        const comment = await createComment({ content, attachmentIds, suppressAgentIds });
+        const comment = await createComment({ content, attachmentIds, suppressAgentIds, skillMentionAgents });
         warnUnhandledTriggers(comment?.trigger_outcomes, comment?.content);
         return true;
       } catch (err) {
@@ -321,7 +321,7 @@ export function useIssueTimeline(issueId: string, userId?: string) {
   );
 
   const submitReply = useCallback(
-    async (parentId: string, content: string, attachmentIds?: string[], suppressAgentIds?: string[]): Promise<boolean> => {
+    async (parentId: string, content: string, attachmentIds?: string[], suppressAgentIds?: string[], skillMentionAgents?: Record<string, string[]>): Promise<boolean> => {
       if (!content.trim() || !userId) return false;
       try {
         const comment = await createComment({
@@ -330,6 +330,7 @@ export function useIssueTimeline(issueId: string, userId?: string) {
           parentId,
           attachmentIds,
           suppressAgentIds,
+          skillMentionAgents,
         });
         warnUnhandledTriggers(comment?.trigger_outcomes, comment?.content);
         return true;
@@ -346,9 +347,9 @@ export function useIssueTimeline(issueId: string, userId?: string) {
   );
 
   const editComment = useCallback(
-    async (commentId: string, content: string, attachmentIds: string[], suppressAgentIds?: string[]) => {
+    async (commentId: string, content: string, attachmentIds: string[], suppressAgentIds?: string[], skillMentionAgents?: Record<string, string[]>) => {
       try {
-        const comment = await updateComment({ commentId, content, attachmentIds, suppressAgentIds });
+        const comment = await updateComment({ commentId, content, attachmentIds, suppressAgentIds, skillMentionAgents });
         warnUnhandledTriggers(comment?.trigger_outcomes, comment?.content);
       } catch (err) {
         toast.error(

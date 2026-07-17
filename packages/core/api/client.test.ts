@@ -468,6 +468,58 @@ describe("ApiClient", () => {
     ]);
   });
 
+  it("serializes skill_mention_agents (array values) into create/update comment bodies and omits it when empty", async () => {
+    const commentPayload = {
+      id: "comment-1",
+      issue_id: "issue-1",
+      author_type: "member",
+      author_id: "user-1",
+      content: "hello",
+      type: "comment",
+      parent_id: null,
+      reactions: [],
+      attachments: [],
+      created_at: "2026-06-05T00:00:00Z",
+      updated_at: "2026-06-05T00:00:00Z",
+    };
+    const okJson = (status: number) =>
+      new Response(JSON.stringify(commentPayload), {
+        status,
+        headers: { "Content-Type": "application/json" },
+      });
+
+    // Happy path: a non-empty skill→agent_ids map is sent verbatim for both
+    // create and update.
+    const withMap = vi.fn()
+      .mockResolvedValueOnce(okJson(201))
+      .mockResolvedValueOnce(okJson(200));
+    vi.stubGlobal("fetch", withMap);
+    const client = new ApiClient("https://api.example.test");
+    const skillMentionAgents = { "skill-1": ["agent-1", "agent-2"], "skill-2": ["agent-3"] };
+    await client.createComment("issue-1", "hello", "comment", undefined, undefined, undefined, skillMentionAgents);
+    await client.updateComment("comment-1", "hello", undefined, undefined, skillMentionAgents);
+
+    const bodies = withMap.mock.calls.map(([, init]) => JSON.parse(init?.body as string) as Record<string, unknown>);
+    expect(bodies.map((b) => b.skill_mention_agents)).toEqual([skillMentionAgents, skillMentionAgents]);
+
+    // Edge: an empty map and `undefined` both omit the key entirely.
+    const empty = vi.fn()
+      .mockResolvedValueOnce(okJson(201))
+      .mockResolvedValueOnce(okJson(201))
+      .mockResolvedValueOnce(okJson(200))
+      .mockResolvedValueOnce(okJson(200));
+    vi.stubGlobal("fetch", empty);
+    await client.createComment("issue-1", "hello", "comment", undefined, undefined, undefined, {});
+    await client.createComment("issue-1", "hello");
+    await client.updateComment("comment-1", "hello", undefined, undefined, {});
+    await client.updateComment("comment-1", "hello");
+
+    const emptyBodies = empty.mock.calls.map(([, init]) => JSON.parse(init?.body as string) as Record<string, unknown>);
+    for (const body of emptyBodies) {
+      expect(body).not.toHaveProperty("skill_mention_agents");
+    }
+  });
+
   it("uses the Cloud Runtime node API contract", async () => {
     const node = {
       id: "node-1",

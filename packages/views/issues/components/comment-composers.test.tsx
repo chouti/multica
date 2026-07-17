@@ -230,7 +230,7 @@ describe("comment composers", () => {
     fireEvent.click(getSubmitButton(container));
 
     await waitFor(() => {
-      expect(onSubmit).toHaveBeenCalledWith("hello from composer", undefined, undefined);
+      expect(onSubmit).toHaveBeenCalledWith("hello from composer", undefined, undefined, undefined);
     });
   });
 
@@ -244,7 +244,7 @@ describe("comment composers", () => {
     fireEvent.click(getSubmitButton(container));
 
     await waitFor(() => {
-      expect(onSubmit).toHaveBeenCalledWith("thread reply", undefined, undefined);
+      expect(onSubmit).toHaveBeenCalledWith("thread reply", undefined, undefined, undefined);
     });
   });
 
@@ -266,7 +266,7 @@ describe("comment composers", () => {
         "true",
       ),
     );
-    expect(onSubmit).toHaveBeenCalledWith("sending", undefined, undefined);
+    expect(onSubmit).toHaveBeenCalledWith("sending", undefined, undefined, undefined);
 
     resolveSubmit(true);
 
@@ -408,6 +408,7 @@ describe("comment composers — upload submit gate", () => {
       expect(onSubmit).toHaveBeenCalledWith(
         expect.stringContaining("https://cdn.example/att-9.png"),
         ["att-9"],
+        undefined,
         undefined,
       ),
     );

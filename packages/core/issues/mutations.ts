@@ -704,13 +704,15 @@ export function useCreateComment(issueId: string) {
       parentId,
       attachmentIds,
       suppressAgentIds,
+      skillMentionAgents,
     }: {
       content: string;
       type?: string;
       parentId?: string;
       attachmentIds?: string[];
       suppressAgentIds?: string[];
-    }) => api.createComment(issueId, content, type, parentId, attachmentIds, suppressAgentIds),
+      skillMentionAgents?: Record<string, string[]>;
+    }) => api.createComment(issueId, content, type, parentId, attachmentIds, suppressAgentIds, skillMentionAgents),
     onSuccess: (comment) => {
       const entry: TimelineEntry = {
         type: "comment",
@@ -756,12 +758,14 @@ export function useUpdateComment(issueId: string) {
       content,
       attachmentIds,
       suppressAgentIds,
+      skillMentionAgents,
     }: {
       commentId: string;
       content: string;
       attachmentIds: string[];
       suppressAgentIds?: string[];
-    }) => api.updateComment(commentId, content, attachmentIds, suppressAgentIds),
+      skillMentionAgents?: Record<string, string[]>;
+    }) => api.updateComment(commentId, content, attachmentIds, suppressAgentIds, skillMentionAgents),
     onMutate: async ({ commentId, content, attachmentIds }) => {
       await qc.cancelQueries({ queryKey: issueKeys.timeline(issueId) });
       const prev = qc.getQueryData<TimelineCache>(issueKeys.timeline(issueId));

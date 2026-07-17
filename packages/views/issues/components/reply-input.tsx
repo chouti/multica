@@ -27,7 +27,7 @@ interface ReplyInputProps {
   avatarId: string;
   /** Resolves true on success, false on failure — the reply box keeps its text
    *  (locked + spinning) until then, clearing only on success. */
-  onSubmit: (content: string, attachmentIds?: string[], suppressAgentIds?: string[]) => Promise<boolean>;
+  onSubmit: (content: string, attachmentIds?: string[], suppressAgentIds?: string[], skillMentionAgents?: Record<string, string[]>) => Promise<boolean>;
   size?: "sm" | "default";
   /** When set, hydrates/persists the in-progress reply via the draft store.
    *  Required for replies inside virtualized timeline threads, where the
@@ -144,6 +144,9 @@ function ReplyInput({
     const suppressAgentIds = triggerPreview.agents
       .filter((agent) => suppressedAgentIds.has(agent.id))
       .map((agent) => agent.id);
+    // U2: skill→agent routing map plumbed but not yet populated (see U3);
+    // forward `undefined` so the request omits `skill_mention_agents` for now.
+    const skillMentionAgents: Record<string, string[]> | undefined = undefined;
     // Pessimistic submit (see CommentInput): keep the text, lock + spin, clear
     // only once the server accepts it.
     setSubmitting(true);
@@ -152,6 +155,7 @@ function ReplyInput({
         content,
         activeIds.length > 0 ? activeIds : undefined,
         suppressAgentIds.length > 0 ? suppressAgentIds : undefined,
+        skillMentionAgents,
       );
       if (ok) {
         editorRef.current?.clearContent();

@@ -18,7 +18,7 @@ interface CommentInputProps {
   /** Resolves true on success, false on failure. The composer keeps the text
    *  (editor locked + button spinning) until this settles, then clears only on
    *  success — a failed send must not silently discard the user's draft. */
-  onSubmit: (content: string, attachmentIds?: string[], suppressAgentIds?: string[]) => Promise<boolean>;
+  onSubmit: (content: string, attachmentIds?: string[], suppressAgentIds?: string[], skillMentionAgents?: Record<string, string[]>) => Promise<boolean>;
 }
 
 function CommentInput({ issueId, onSubmit }: CommentInputProps) {
@@ -127,6 +127,10 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
     const suppressAgentIds = triggerPreview.agents
       .filter((agent) => suppressedAgentIds.has(agent.id))
       .map((agent) => agent.id);
+    // U2: the skill→agent routing map is plumbed through the submit path but
+    // not yet populated from the skill-chip gesture (that's U3). Forward
+    // `undefined` so the request omits `skill_mention_agents` for now.
+    const skillMentionAgents: Record<string, string[]> | undefined = undefined;
     // Pessimistic submit: keep the text in place (the editor is locked and the
     // button spins via `submitting`) until the server actually accepts it, then
     // clear. Clearing only on success means a slow send no longer looks like
@@ -138,6 +142,7 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
         content,
         activeIds.length > 0 ? activeIds : undefined,
         suppressAgentIds.length > 0 ? suppressAgentIds : undefined,
+        skillMentionAgents,
       );
       if (ok) {
         editorRef.current?.clearContent();
