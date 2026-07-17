@@ -753,6 +753,125 @@ func TestEnqueueSkillMention_MalformedMentionIDCarryingDesignationIsSilentlySkip
 	}
 }
 
+// TestEnqueueSkillMention_MultipleSkillsDesignatedToSameAgentAllBound covers
+// the correctness re-review finding: the previous skillBindings map was
+// keyed by agent id only, so a single agent designated for two distinct
+// @skill chips (e.g. "[@S1] and [@S2] by agent-X") got only the second
+// skill bound. The new map is a slice per agent.
+func TestEnqueueSkillMention_MultipleSkillsDesignatedToSameAgentAllBound(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	fx := newSkillMentionFixture(t)
+
+	// Create a second skill (skillA + skillB are seeded by the fixture; we
+	// need a THIRD one to exercise "two skills, same agent" cleanly).
+	skillC := insertHandlerTestSkill(t, "skill-mention-c", "skill C")
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(),
+			`DELETE FROM agent_skill WHERE skill_id = $1`, skillC)
+		testPool.Exec(context.Background(),
+			`DELETE FROM skill_file WHERE skill_id = $1`, skillC)
+		testPool.Exec(context.Background(),
+			`DELETE FROM skill WHERE id = $1`, skillC)
+	})
+
+	// Other agent starts unbound to BOTH skills A and C.
+	if got := countAgentSkillBindingsFor(t, fx.OtherAgentID, fx.SkillID); got != 0 {
+		t.Fatalf("precondition: other should be unbound to skillA, got %d", got)
+	}
+	if got := countAgentSkillBindingsFor(t, fx.OtherAgentID, skillC); got != 0 {
+		t.Fatalf("precondition: other should be unbound to skillC, got %d", got)
+	}
+
+	// Comment with two @skill chips, both designating "other".
+	content := "[@SkillA](mention://skill/" + fx.SkillID + ") and " +
+		"[@SkillC](mention://skill/" + skillC + ") please review"
+	commentID := insertSkillMentionComment(t, fx.IssueID, content)
+
+	triggerSkillMentions(t, ctx, fx, commentID, map[string][]pgtype.UUID{
+		fx.SkillID: {parseUUIDForTest(t, fx.OtherAgentID)},
+		skillC:     {parseUUIDForTest(t, fx.OtherAgentID)},
+	})
+
+	// Both skills must be bound to the designated agent.
+	if got := countAgentSkillBindingsFor(t, fx.OtherAgentID, fx.SkillID); got != 1 {
+		t.Fatalf("expected skillA bound to other, got %d", got)
+	}
+	if got := countAgentSkillBindingsFor(t, fx.OtherAgentID, skillC); got != 1 {
+		t.Fatalf("expected skillC bound to other, got %d (regression: the per-agent skill map was a single id, not a list)", got)
+	}
+	// Exactly one task on the designated agent (the per-agent dedup still
+	// holds across the two skill chips).
+	if got := countQueuedOrDispatched(t, fx.OtherAgentID, fx.IssueID); got != 1 {
+		t.Fatalf("expected 1 task on designated agent, got %d", got)
+	}
+}
+
+// TestEnqueueSkillMention_ImplicitAndDesignatedSameAgent_NoBindWithoutRun is
+// the test the prior TestEnqueueSkillMention_DesignatedSameAsReplyParentProducesOneTask
+// WASN'T, because the prior test pre-bound the agent at setup, which masked
+// the bind-without-run shape. This test deliberately leaves the agent
+// UNBOUND at setup and asserts the bind-without-run weapon is closed:
+// implicit path + @skill designating the same agent -> agent runs (via
+// implicit) and the agent_skill row is NEVER created (the dedup removed
+// the skill trigger before bind).
+func TestEnqueueSkillMention_ImplicitAndDesignatedSameAgent_NoBindWithoutRun(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	fx := newSkillMentionFixture(t)
+
+	// "other" agent starts UNBOUND to skillA. (The fixture does NOT pre-bind
+	// other to skillA — only J is bound to skillA — so this precondition
+	// already holds. We assert it explicitly for clarity.)
+	if got := countAgentSkillBindingsFor(t, fx.OtherAgentID, fx.SkillID); got != 0 {
+		t.Fatalf("precondition: other should be unbound to skillA, got %d", got)
+	}
+
+	// Build a comment authored by "other" so the reply's parent-author
+	// trigger will target other; member reply designates other via @skill.
+	parentID := insertSkillMentionComment(t, fx.IssueID, "first revision")
+	if _, err := testPool.Exec(ctx, `
+		UPDATE comment SET author_type = 'agent', author_id = $1 WHERE id = $2
+	`, fx.OtherAgentID, parentID); err != nil {
+		t.Fatalf("re-author parent: %v", err)
+	}
+	replyContent := "[@SkillA](mention://skill/" + fx.SkillID + ") please review"
+	replyID := insertSkillMentionComment(t, fx.IssueID, replyContent)
+
+	parent, err := testHandler.Queries.GetComment(ctx, parseUUID(parentID))
+	if err != nil {
+		t.Fatalf("load parent: %v", err)
+	}
+	issue, err := testHandler.Queries.GetIssue(ctx, parseUUID(fx.IssueID))
+	if err != nil {
+		t.Fatalf("load issue: %v", err)
+	}
+	comment, err := testHandler.Queries.GetComment(ctx, parseUUID(replyID))
+	if err != nil {
+		t.Fatalf("load comment: %v", err)
+	}
+
+	_ = testHandler.triggerTasksForComment(ctx, issue, comment, &parent, "member", testUserID, "", nil, map[string][]pgtype.UUID{
+		fx.SkillID: {parseUUIDForTest(t, fx.OtherAgentID)},
+	})
+
+	// Exactly one task on other (the R5 dedup kept the implicit reply-parent
+	// trigger, dropped the skill duplicate).
+	if got := countQueuedOrDispatched(t, fx.OtherAgentID, fx.IssueID); got != 1 {
+		t.Fatalf("expected exactly 1 task on other (dedup kept reply-parent), got %d", got)
+	}
+	// Bind-without-run contract: the dedup removed the skill trigger before
+	// bind, so the agent_skill row must NOT be created. Other agent is
+	// unbound to skillA throughout.
+	if got := countAgentSkillBindingsFor(t, fx.OtherAgentID, fx.SkillID); got != 0 {
+		t.Fatalf("bind-without-run weapon still active: other has %d agent_skill rows for skillA, want 0", got)
+	}
+}
+
 // updateCommentExpectBadRequest posts a PUT with the given body and asserts
 // the handler returns 400. Uses the router-level path so the JSON decode +
 // parseSkillMentionAgents boundary validation are both exercised.
