@@ -76,11 +76,20 @@ export function useCommentTriggerPreview({
   parentId,
   editingCommentId,
   content,
+  // Frontend-only preview rows for skill designations. The backend's
+  // preview path intentionally discards skill_mention_agents (the
+  // read-only preview never binds or triggers a skill) so the composer
+  // must surface designated agents from its own local state. Each
+  // entry should carry source = "mention_skill" and the agent's
+  // id/name/avatar so it matches the chip's rendering contract.
+  // Review finding #11.
+  skillDesignatedAgents,
 }: {
   issueId: string;
   parentId?: string;
   editingCommentId?: string;
   content: string;
+  skillDesignatedAgents?: CommentTriggerPreviewAgent[];
 }): UseCommentTriggerPreviewResult {
   const signature = useMemo(() => commentTriggerPreviewSignature(content), [content]);
   const debouncedSignature = useDebouncedSignature(signature);
@@ -117,8 +126,19 @@ export function useCommentTriggerPreview({
     return { agents: [], blocked: [] };
   }
 
+  const backendAgents = previewQuery.data?.agents ?? [];
+  // Merge backend agents with the frontend-only skill-designated agents.
+  // Dedup by agent id so a designated agent that the backend also picked
+  // (e.g. via @agent in the same comment) does not appear twice.
+  const designated = skillDesignatedAgents ?? [];
+  const backendIds = new Set(backendAgents.map((a) => a.id));
+  const merged: CommentTriggerPreviewAgent[] = [
+    ...backendAgents,
+    ...designated.filter((a) => !backendIds.has(a.id)),
+  ];
+
   return {
-    agents: previewQuery.data?.agents ?? [],
+    agents: merged,
     blocked: previewQuery.data?.blocked ?? [],
   };
 }

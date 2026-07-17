@@ -15,6 +15,7 @@ import type { AvatarSize } from "@multica/ui/lib/avatar-size";
 import { useT } from "../../i18n";
 import { CommentTriggerChips } from "./comment-trigger-chips";
 import { useCommentTriggerPreview } from "../hooks/use-comment-trigger-preview";
+import { useSkillDesignatedPreviewAgents } from "../hooks/use-skill-designated-preview-agents";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -72,7 +73,14 @@ function ReplyInput({
   const [skillMentionAgents, setSkillMentionAgents] = useState<Record<string, string[]>>({});
   // Composer-owned popover-open state, keyed by skill id (see comment-input).
   const [openPopoverFor, setOpenPopoverFor] = useState<string | null>(null);
-  const triggerPreview = useCommentTriggerPreview({ issueId, parentId, content });
+  // Skill-designated agents surfaced as preview chips (see comment-input).
+  const skillDesignatedAgents = useSkillDesignatedPreviewAgents(wsId, skillMentionAgents);
+  const triggerPreview = useCommentTriggerPreview({
+    issueId,
+    parentId,
+    content,
+    skillDesignatedAgents,
+  });
   // Attachments uploaded in this composer session — see CommentInput for the
   // rationale (drives both submit-time attachment_ids and editor previews).
   const [pendingAttachments, setPendingAttachments] = useState<Attachment[]>([]);

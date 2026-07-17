@@ -13,6 +13,7 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { useT } from "../../i18n";
 import { CommentTriggerChips } from "./comment-trigger-chips";
 import { useCommentTriggerPreview } from "../hooks/use-comment-trigger-preview";
+import { useSkillDesignatedPreviewAgents } from "../hooks/use-skill-designated-preview-agents";
 
 interface CommentInputProps {
   issueId: string;
@@ -50,7 +51,15 @@ function CommentInput({ issueId, onSubmit, editorComponent: EditorComponent = Co
   // the per-NodeView useState so a Tiptap NodeView recreation does not
   // close the picker mid-selection (review finding #14).
   const [openPopoverFor, setOpenPopoverFor] = useState<string | null>(null);
-  const triggerPreview = useCommentTriggerPreview({ issueId, content });
+  // Skill-designated agents surfaced as preview chips from the local
+  // skillMentionAgents map (the backend's preview discards the field
+  // for safety — it never binds or triggers on the read-only path).
+  const skillDesignatedAgents = useSkillDesignatedPreviewAgents(wsId, skillMentionAgents);
+  const triggerPreview = useCommentTriggerPreview({
+    issueId,
+    content,
+    skillDesignatedAgents,
+  });
   // Attachments uploaded in this composer session. Drives both:
   //  - submit-time `attachment_ids` payload (filtered to URLs still in markdown)
   //  - the editor's AttachmentDownloadProvider, so file-card Eye buttons can
