@@ -38,6 +38,9 @@ A conditional rendering path in adaptive UI components. Computed directly from d
 ### Skill Import
 The act of copying a skill from a runtime into a workspace. Imports can be single (one skill) or bulk (multiple skills). Bulk imports may encounter name conflicts, which are resolved via overwrite, rename, or skip decisions. The import flow preserves selection state across UI branch switches when the dialog remains open.
 
+### Skill Mention Gesture
+The explicit "pick an agent" action attached to a `@skill` mention chip in the comment composer. A `@skill` chip is inert until the gesture designates an available agent; designating one and submitting durably binds the skill to that agent (when not already bound) and enqueues the agent to run with the skill's full bundle. A chip with no designated agent reverts to plain text and never triggers on its own. This replaces the earlier binding-table reverse-lookup routing (`resolveSkillMentionTrigger`).
+
 ---
 
 ## Agent Access
