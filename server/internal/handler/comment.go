@@ -2614,9 +2614,10 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Content          string    `json:"content"`
-		AttachmentIDs    *[]string `json:"attachment_ids"`
-		SuppressAgentIDs []string  `json:"suppress_agent_ids"`
+		Content            string            `json:"content"`
+		AttachmentIDs      *[]string         `json:"attachment_ids"`
+		SuppressAgentIDs   []string          `json:"suppress_agent_ids"`
+		SkillMentionAgents map[string][]string `json:"skill_mention_agents"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -2628,6 +2629,17 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 	req.Content = sanitizeNullBytes(req.Content)
 	if req.Content == "" {
 		writeError(w, http.StatusBadRequest, "content is required")
+		return
+	}
+	// Parse skill_mention_agents at the boundary so a malformed agent UUID 400s
+	// here instead of leaking into the retrigger path (mirror CreateComment at
+	// comment.go:1333). The parsed map is forwarded to the retrigger so the
+	// edit path binds + enqueues for any @skill designation the client sets.
+	// AddAgentSkill is idempotent (ON CONFLICT DO NOTHING) so re-binding on edit
+	// is a safe no-op, and idx_one_pending_task_per_issue_agent dedupes the
+	// trigger against any in-flight run.
+	skillAgents, ok := parseSkillMentionAgents(w, req.SkillMentionAgents, "skill_mention_agents")
+	if !ok {
 		return
 	}
 
@@ -2694,7 +2706,7 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 		}
 
 		h.retriggerCancelledTaskSurvivors(r.Context(), issue, cancelled, existing.ID)
-		return h.triggerTasksForComment(r.Context(), issue, comment, parentComment, actorType, actorID, h.invokeOriginatorFromRequest(r, actorType, actorID), suppressAgentIDs, nil)
+		return h.triggerTasksForComment(r.Context(), issue, comment, parentComment, actorType, actorID, h.invokeOriginatorFromRequest(r, actorType, actorID), suppressAgentIDs, skillAgents)
 	}
 
 	// Replace the comment attachment set when a modern client sends

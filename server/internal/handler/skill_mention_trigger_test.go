@@ -2,6 +2,9 @@ package handler
 
 import (
 	"context"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -527,4 +530,93 @@ func parseUUIDForTest(t *testing.T, s string) pgtype.UUID {
 		t.Fatalf("parseUUIDForTest(%q): invalid uuid", s)
 	}
 	return u
+}
+
+// TestUpdateComment_ReTriggersSkillMentionDesignation locks in the edit-path
+// symmetry: when an edit sends skill_mention_agents, the retrigger must bind +
+// enqueue the designated agent (mirroring the create path), not silently drop
+// the field (regression for review finding #1).
+func TestUpdateComment_ReTriggersSkillMentionDesignation(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	fx := newSkillMentionFixture(t)
+	// A second handler-test agent that starts UNBOUND to skillA — exercising
+	// the bind-on-edit side of the symmetry.
+	agentID := createHandlerTestAgent(t, "Edit Skill Designated", nil)
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(),
+			`DELETE FROM agent_skill WHERE agent_id = $1 AND skill_id = $2`,
+			agentID, fx.SkillID)
+		testPool.Exec(context.Background(),
+			`DELETE FROM agent_task_queue WHERE issue_id = $1 AND agent_id = $2`,
+			fx.IssueID, agentID)
+	})
+
+	// Start with a plain comment (no @skill yet).
+	commentID := postCommentForTriggerPreviewTest(t, fx.IssueID, map[string]any{
+		"content": "first revision",
+	})
+
+	// Edit to a @skill mention and designate the unbound agent.
+	content := fmt.Sprintf("[@SkillA](mention://skill/%s) please review", fx.SkillID)
+	updateCommentForTriggerPreviewTest(t, commentID, map[string]any{
+		"content":              content,
+		"skill_mention_agents": map[string][]string{fx.SkillID: {agentID}},
+	})
+
+	if got := countQueuedCommentTriggerTasks(t, fx.IssueID, agentID); got != 1 {
+		t.Fatalf("edit retrigger: expected 1 queued task on designated agent, got %d", got)
+	}
+	// Bind-on-edit side effect: designated agent must now be bound.
+	if got := countAgentSkillBindingsFor(t, agentID, fx.SkillID); got != 1 {
+		t.Fatalf("edit retrigger: expected designated agent bound to skillA, got %d bindings", got)
+	}
+	if got := countQueuedCommentTriggerTasks(t, fx.IssueID, fx.JID); got != 0 {
+		t.Fatalf("edit retrigger: expected 0 queued tasks on existing binding J (not designated), got %d", got)
+	}
+}
+
+// TestUpdateComment_MalformedSkillMentionAgentUUID400s covers the boundary
+// validation: an edit that sends a skill_mention_agents entry with a non-UUID
+// agent id must 400 at the boundary (plan U1 explicit scenario that was
+// missing — see review finding #1 testing gap).
+func TestUpdateComment_MalformedSkillMentionAgentUUID400s(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	fx := newSkillMentionFixture(t)
+	commentID := postCommentForTriggerPreviewTest(t, fx.IssueID, map[string]any{
+		"content": "first",
+	})
+	content := fmt.Sprintf("[@SkillA](mention://skill/%s) please review", fx.SkillID)
+
+	// Drive update via the router so we observe the HTTP status. Use a raw
+	// request with a malformed agent UUID inside skill_mention_agents.
+	updateCommentExpectBadRequest(t, commentID, map[string]any{
+		"content":              content,
+		"skill_mention_agents": map[string][]string{fx.SkillID: {"not-a-uuid"}},
+	})
+
+	// Verify no side effect: the malformed UUID must NOT have created any
+	// new agent_skill binding for J (it already had one from the fixture).
+	if got := countAgentSkillBindingsFor(t, fx.JID, fx.SkillID); got != 1 {
+		t.Fatalf("malformed UUID must not create a duplicate binding; got %d, want 1", got)
+	}
+}
+
+// updateCommentExpectBadRequest posts a PUT with the given body and asserts
+// the handler returns 400. Uses the router-level path so the JSON decode +
+// parseSkillMentionAgents boundary validation are both exercised.
+func updateCommentExpectBadRequest(t *testing.T, commentID string, body map[string]any) {
+	t.Helper()
+	req := newRequest(http.MethodPut, "/api/comments/"+commentID, body)
+	req = withURLParam(req, "commentId", commentID)
+	w := httptest.NewRecorder()
+	testHandler.UpdateComment(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+	}
 }
