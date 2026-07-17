@@ -1005,9 +1005,9 @@ type CreateCommentRequest struct {
 }
 
 type CommentTriggerPreviewRequest struct {
-	Content           string            `json:"content"`
-	ParentID          *string           `json:"parent_id"`
-	EditingCommentID  *string           `json:"editing_comment_id"`
+	Content            string            `json:"content"`
+	ParentID           *string           `json:"parent_id"`
+	EditingCommentID   *string           `json:"editing_comment_id"`
 	SkillMentionAgents map[string]string `json:"skill_mention_agents"`
 }
 
@@ -1094,6 +1094,33 @@ type commentTriggerComputeOptions struct {
 	// (e.g. legacy client or the preview endpoint) — the backend then falls
 	// back to the junction-table lookup or the issue-assignee fallback.
 	SkillMentionAgents map[string]pgtype.UUID
+
+	// AutopilotDelegationAuthorityUserID is the lineage-verified autopilot
+	// creator whose invoke rights an UNATTRIBUTED autopilot dispatch borrows
+	// for the A2A gate when it delegates mid-chain on the issue that autopilot
+	// created (MUL-4857, backported from v0.4.3 to keep this fork compileable
+	// alongside 0.4.3 upstream changes). It is resolved SEPARATELY from
+	// OriginatorUserID, at the trusted request/comment boundary, from the
+	// server-trusted speaking task; it is empty whenever that lineage cannot
+	// be verified, which keeps the gate fail-closed. effectiveInvoker consults
+	// it ONLY when OriginatorUserID is empty. Authorization input only —
+	// attribution/audit read OriginatorUserID, never this, so the enqueued run
+	// stays unattributed.
+	AutopilotDelegationAuthorityUserID string
+}
+
+// effectiveInvoker is the human principal the A2A invoke gate (canInvokeAgent)
+// keys on for this comment: the resolved top-of-chain human originator, or —
+// only when the run carried no human originator — the lineage-verified
+// autopilot delegation authority (MUL-4857). OriginatorUserID is left
+// untouched so attribution stays accurate; the authority is a gate-only
+// fallback. For member actors both are the member (or the fallback is
+// unset), and canInvokeAgent ignores this value for members anyway.
+func (o commentTriggerComputeOptions) effectiveInvoker() string {
+	if o.OriginatorUserID != "" {
+		return o.OriginatorUserID
+	}
+	return o.AutopilotDelegationAuthorityUserID
 }
 
 func commentAgentTriggerReason(trigger commentAgentTrigger) string {

@@ -3044,6 +3044,27 @@ func resumeUnsafeFailureReason(reason string) bool {
 	}
 }
 
+// ResumeUnsafeFailure reports whether a failed task's agent session must NOT
+// be resumed on a retry. It combines the failure_reason poison set
+// (resumeUnsafeFailureReason) with the SAME defense-in-depth on raw error
+// text that the GetLastTaskSession / GetLastChatTaskSession resume queries
+// apply: an Anthropic 400 invalid_request_error means the conversation
+// history itself is unprocessable even when failure_reason was mis- or
+// un-classified (legacy 'agent_error' rows, deploy-window rows). Callers
+// that only have a failure_reason may pass an empty errorText.
+//
+// This is the shared source of truth for the manual-retry claim path
+// (backported from v0.4.3 MUL-4869 / MUL-4857), which reads the exact
+// source task instead of GetLastTaskSession and would otherwise bypass
+// the error-text guard.
+func ResumeUnsafeFailure(failureReason, errorText string) bool {
+	if resumeUnsafeFailureReason(failureReason) {
+		return true
+	}
+	lower := strings.ToLower(errorText)
+	return strings.Contains(lower, "400") && strings.Contains(lower, "invalid_request_error")
+}
+
 // retryEligible reports whether a failed task qualifies for an automatic retry
 // attempt: an infrastructure-shaped failure_reason, remaining attempt budget,
 // not an autopilot run, and linked to an issue or chat session. Shared by
