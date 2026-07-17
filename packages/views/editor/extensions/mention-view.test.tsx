@@ -22,27 +22,44 @@ vi.mock("@tiptap/react", () => {
 // Keep the gesture layer lightweight: the composer popover/picker integration
 // is covered by the dedicated picker test, while this file only asserts the
 // chip's visual states and click behavior.
-vi.mock("@multica/ui/components/ui/popover", () => ({
-  Popover: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  PopoverTrigger: ({
-    children,
-    render,
-  }: {
-    children?: React.ReactNode;
-    render?: (props: Record<string, unknown>) => React.ReactElement;
-  }) => {
-    const triggerProps = {
-      onClick: () => {},
-      "aria-expanded": false,
-      "aria-haspopup": "dialog" as const,
-    };
-    const trigger = render?.(triggerProps) ?? <span {...triggerProps} />;
-    return <span data-testid="popover-trigger">{trigger}{children}</span>;
-  },
-  PopoverContent: ({ children }: { children: React.ReactNode }) => (
-    <div data-testid="popover-content">{children}</div>
-  ),
-}));
+vi.mock("@multica/ui/components/ui/popover", () => {
+  // Track the Popover's open state so PopoverContent conditionally renders
+  // and tests can assert whether the popover is open or closed.
+  let _open = false;
+  return {
+    Popover: ({
+      children,
+      open,
+    }: {
+      children: React.ReactNode;
+      open?: boolean;
+    }) => {
+      _open = open ?? false;
+      return (
+        <span data-popover-open={String(!!open)}>{children}</span>
+      );
+    },
+    PopoverTrigger: ({
+      children,
+      render,
+    }: {
+      children?: React.ReactNode;
+      render?: (props: Record<string, unknown>) => React.ReactElement;
+    }) => {
+      const triggerProps = {
+        onClick: () => {},
+        "aria-expanded": false,
+        "aria-haspopup": "dialog" as const,
+      };
+      const trigger = render?.(triggerProps) ?? <span {...triggerProps} />;
+      return <span data-testid="popover-trigger">{trigger}{children}</span>;
+    },
+    PopoverContent: ({ children }: { children: React.ReactNode }) => {
+      if (!_open) return null;
+      return <div data-testid="popover-content">{children}</div>;
+    },
+  };
+});
 
 vi.mock("../skill-agent-picker", () => ({
   SkillAgentPicker: ({
@@ -206,7 +223,10 @@ describe("MentionView — skill mention gesture", () => {
       type: "skill",
       id: "skill-1",
       label: "code-review",
-      context: makeSkillContext({ onSkillMentionChange }),
+      context: makeSkillContext({
+        onSkillMentionChange,
+        openPopoverFor: "skill-1",
+      }),
     });
 
     fireEvent.click(screen.getByTestId("skill-mention-trigger-skill-1"));
@@ -223,6 +243,7 @@ describe("MentionView — skill mention gesture", () => {
       context: makeSkillContext({
         skillMentionAgents: { "skill-1": ["agent-1"] },
         onSkillMentionChange,
+        openPopoverFor: "skill-1",
       }),
     });
 
@@ -231,5 +252,46 @@ describe("MentionView — skill mention gesture", () => {
     fireEvent.click(screen.getByTestId("skill-mention-trigger-skill-1"));
     fireEvent.click(screen.getByTestId("skill-picker-clear"));
     expect(onSkillMentionChange).toHaveBeenCalledWith("skill-1", []);
+  });
+
+  it("popover open state survives a React re-render (hoisted into context, not local state)", () => {
+    const props = {
+      node: { attrs: { type: "skill", id: "skill-1", label: "code-review" } },
+    } as unknown as ComponentProps<typeof MentionView>;
+
+    const openContext = makeSkillContext({ openPopoverFor: "skill-1" });
+
+    const { rerender, container } = render(
+      <SkillMentionContext.Provider value={openContext}>
+        <MentionViewComponent {...props} />
+      </SkillMentionContext.Provider>,
+    );
+
+    // Popover is open because openPopoverFor matches the skill id.
+    expect(screen.getByTestId("popover-content")).toBeInTheDocument();
+    expect(container.querySelector('[data-popover-open="true"]')).not.toBeNull();
+
+    // Simulate a NodeView recreation via a React re-render with identical
+    // props.  The popover must stay open because the open state lives in
+    // context, not in the NodeView's local useState.
+    rerender(
+      <SkillMentionContext.Provider value={openContext}>
+        <MentionViewComponent {...props} />
+      </SkillMentionContext.Provider>,
+    );
+
+    expect(screen.getByTestId("popover-content")).toBeInTheDocument();
+    expect(container.querySelector('[data-popover-open="true"]')).not.toBeNull();
+
+    // Clearing openPopoverFor should close the popover.
+    const closedContext = makeSkillContext({ openPopoverFor: null });
+    rerender(
+      <SkillMentionContext.Provider value={closedContext}>
+        <MentionViewComponent {...props} />
+      </SkillMentionContext.Provider>,
+    );
+
+    expect(screen.queryByTestId("popover-content")).not.toBeInTheDocument();
+    expect(container.querySelector('[data-popover-open="false"]')).not.toBeNull();
   });
 });

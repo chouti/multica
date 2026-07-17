@@ -916,6 +916,136 @@ func TestUpdateComment_SkillMentionAgentsOverPerSkillCap400s(t *testing.T) {
 	// fixture; the cap-blocked request must not have touched it).
 }
 
+// TestUpdateComment_SkillMentionAgentsOverMapSizeCap400s covers the total-map-
+// size boundary: a request with more than maxSkillMentionAgentsMapSize (16)
+// skill entries must 400 at the boundary, even if each per-skill list is within
+// the per-skill cap. This complements TestUpdateComment_SkillMentionAgentsOverPerSkillCap400s
+// which tests the per-skill cap.
+func TestUpdateComment_SkillMentionAgentsOverMapSizeCap400s(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	fx := newSkillMentionFixture(t)
+
+	commentID := postCommentForTriggerPreviewTest(t, fx.IssueID, map[string]any{
+		"content": "first",
+	})
+
+	// Build 17 distinct skill IDs. We reuse the fixture's two real skills
+	// for the first two keys and create 15 more so the map has 17 keys total
+	// (one above the cap of 16). Each entry has a single well-formed UUID
+	// so the per-skill cap (8) is not hit.
+	skillIDs := make([]string, 0, 17)
+	skillIDs = append(skillIDs, fx.SkillID, fx.SecondSkillID)
+	for i := 0; i < 15; i++ {
+		skillIDs = append(skillIDs, insertHandlerTestSkill(t, fmt.Sprintf("mapsize-%d", i), fmt.Sprintf("map size skill %d", i)))
+	}
+
+	skillAgents := make(map[string][]string, len(skillIDs))
+	for _, sid := range skillIDs {
+		skillAgents[sid] = []string{fx.OtherAgentID}
+	}
+
+	req := newRequest(http.MethodPut, "/api/comments/"+commentID, map[string]any{
+		"content":              "[@SkillA](mention://skill/" + fx.SkillID + ") please review",
+		"skill_mention_agents": skillAgents,
+	})
+	req = withURLParam(req, "commentId", commentID)
+	w := httptest.NewRecorder()
+	testHandler.UpdateComment(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 on total-map-size cap exceeded (17 skills), got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// TestEnqueueSquadMention_MalformedSquadIDIsNoPanic covers the robustness
+// contract for @squad mentions: a comment whose content contains a
+// mention://squad/<malformed> link (hex-but-not-UUID, matching the regex
+// [0-9a-fA-F-]+) must not panic and must produce 0 queued tasks. The
+// util.ParseUUID call in resolveMentionedAgentCommentTriggers returns an
+// error, and the mention is skipped.
+func TestEnqueueSquadMention_MalformedSquadIDIsNoPanic(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	fx := newSkillMentionFixture(t)
+
+	// "----" matches the mention regex [0-9a-fA-F-]+ but is not a valid UUID.
+	content := "[@Bogus](mention://squad/----) please review"
+	commentID := insertSkillMentionComment(t, fx.IssueID, content)
+
+	// Must not panic. The squad mention is parsed from the content by
+	// computeCommentAgentTriggers → resolveMentionedAgentCommentTriggers;
+	// util.ParseUUID("----") fails and the mention is skipped.
+	triggerSkillMentions(t, ctx, fx, commentID, nil)
+
+	if got := countQueuedOrDispatched(t, fx.JID, fx.IssueID); got != 0 {
+		t.Fatalf("expected 0 queued tasks from malformed squad mention, got %d on J", got)
+	}
+	if got := countQueuedOrDispatched(t, fx.OtherAgentID, fx.IssueID); got != 0 {
+		t.Fatalf("expected 0 queued tasks from malformed squad mention, got %d on other", got)
+	}
+}
+
+// TestEnqueueSkillMention_AlreadyEnabledBindingIsNoOp confirms that the
+// UpsertAgentSkillEnabled upsert is a no-op when the agent_skill row already
+// exists with enabled=TRUE: the existing row is untouched, no duplicate rows
+// are created, and the task is still enqueued (subject to dedup).
+func TestEnqueueSkillMention_AlreadyEnabledBindingIsNoOp(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	fx := newSkillMentionFixture(t)
+
+	// Pre-insert an already-enabled agent_skill row for "other" + skillA.
+	// The fixture does NOT bind other to skillA (only J is bound), so this
+	// is the first binding for other+skillA.
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_skill (agent_id, skill_id, enabled) VALUES ($1, $2, true)
+	`, fx.OtherAgentID, fx.SkillID); err != nil {
+		t.Fatalf("insert enabled binding: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(),
+			`DELETE FROM agent_skill WHERE agent_id = $1 AND skill_id = $2`,
+			fx.OtherAgentID, fx.SkillID)
+	})
+
+	// Record the row count before the trigger so we can assert no extra rows.
+	beforeBindings := countAgentSkillBindingsFor(t, fx.OtherAgentID, fx.SkillID)
+	if beforeBindings != 1 {
+		t.Fatalf("precondition: expected 1 pre-existing binding, got %d", beforeBindings)
+	}
+
+	commentID := insertSkillMentionComment(t, fx.IssueID,
+		"[@SkillA](mention://skill/"+fx.SkillID+") please review")
+	triggerSkillMentions(t, ctx, fx, commentID, map[string][]pgtype.UUID{
+		fx.SkillID: {parseUUIDForTest(t, fx.OtherAgentID)},
+	})
+
+	// Task must be enqueued.
+	if got := countQueuedOrDispatched(t, fx.OtherAgentID, fx.IssueID); got != 1 {
+		t.Fatalf("expected 1 queued task on designated agent, got %d", got)
+	}
+	// The agent_skill row must still be present with enabled=TRUE and no
+	// extra rows (upsert hit the ON CONFLICT branch).
+	afterBindings := countAgentSkillBindingsFor(t, fx.OtherAgentID, fx.SkillID)
+	if afterBindings != 1 {
+		t.Fatalf("expected exactly 1 agent_skill row after upsert (no-op on already-enabled), got %d", afterBindings)
+	}
+	var enabled bool
+	if err := testPool.QueryRow(ctx, `
+		SELECT enabled FROM agent_skill WHERE agent_id = $1 AND skill_id = $2
+	`, fx.OtherAgentID, fx.SkillID).Scan(&enabled); err != nil {
+		t.Fatalf("read enabled: %v", err)
+	}
+	if !enabled {
+		t.Fatalf("agent_skill row must remain enabled=TRUE after upsert, got enabled=false")
+	}
+}
+
 // updateCommentExpectBadRequest posts a PUT with the given body and asserts
 // the handler returns 400. Uses the router-level path so the JSON decode +
 // parseSkillMentionAgents boundary validation are both exercised.
