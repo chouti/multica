@@ -2609,8 +2609,20 @@ func (h *Handler) resolveMentionedAgentCommentTriggers(ctx context.Context, issu
 	}
 	for _, m := range mentions {
 		if m.Type == "squad" {
-			// @squad mention → trigger the squad's leader agent.
-			squadUUID := parseUUID(m.ID)
+			// @squad mention → trigger the squad's leader agent. Per repo UUID
+			// rules: m.ID is request-controlled content; the mention regex
+			// admits any hex+'-' run plus the literal "all". Use the safe
+			// ParseUUID variant and skip "all" defensively so a malformed
+			// squad id does not panic MustParseUUID (500 after the comment
+			// row has already committed) — the same robustness gap the
+			// @skill branch removed at #6.
+			if m.ID == "all" {
+				continue
+			}
+			squadUUID, err := util.ParseUUID(m.ID)
+			if err != nil {
+				continue
+			}
 			squad, err := h.Queries.GetSquadInWorkspace(ctx, db.GetSquadInWorkspaceParams{
 				ID:          squadUUID,
 				WorkspaceID: issue.WorkspaceID,
@@ -2669,7 +2681,16 @@ func (h *Handler) resolveMentionedAgentCommentTriggers(ctx context.Context, issu
 		if m.Type != "agent" {
 			continue
 		}
-		agentUUID := parseUUID(m.ID)
+		// Same robustness gap as @squad above: m.ID is request-controlled.
+		// Use util.ParseUUID + skip "all" so a malformed agent id does not
+		// panic MustParseUUID.
+		if m.ID == "all" {
+			continue
+		}
+		agentUUID, err := util.ParseUUID(m.ID)
+		if err != nil {
+			continue
+		}
 		// Load the agent scoped to the current issue's workspace. Using the
 		// bare GetAgent here would let a mention resolve to an agent in a
 		// different workspace, and the visibility check below would then be
