@@ -123,3 +123,11 @@ FROM agent_skill ask
 JOIN skill s ON s.id = ask.skill_id
 WHERE s.workspace_id = $1
 ORDER BY s.name ASC;
+
+-- name: GetAgentSkillEnabled :one
+-- Returns the enabled flag of the agent_skill row for (agent_id, skill_id).
+-- Used by bindDesignatedSkillsForTriggers to distinguish "row missing" from
+-- "row present but disabled" so the bind pass can re-enable a disabled row
+-- (fixing the R3 contract that an agent designated via @skill must actually
+-- receive the skill bundle). Returns sql.ErrNoRows when no row exists.
+SELECT enabled FROM agent_skill WHERE agent_id = $1 AND skill_id = $2;

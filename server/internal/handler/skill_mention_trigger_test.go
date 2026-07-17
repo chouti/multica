@@ -607,6 +607,152 @@ func TestUpdateComment_MalformedSkillMentionAgentUUID400s(t *testing.T) {
 	}
 }
 
+// TestEnqueueSkillMention_DisabledBindingIsReEnabled covers review finding
+// #2: an existing agent_skill row with enabled=FALSE is re-enabled when the
+// agent is designated via @skill (the previous blind AddAgentSkill with
+// ON CONFLICT DO NOTHING left disabled rows disabled, so the agent ran
+// without the skill bundle).
+func TestEnqueueSkillMention_DisabledBindingIsReEnabled(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	fx := newSkillMentionFixture(t)
+
+	// Bind skillA to "other" but explicitly disabled.
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_skill (agent_id, skill_id, enabled) VALUES ($1, $2, false)
+	`, fx.OtherAgentID, fx.SkillID); err != nil {
+		t.Fatalf("insert disabled binding: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(),
+			`DELETE FROM agent_skill WHERE agent_id = $1 AND skill_id = $2`,
+			fx.OtherAgentID, fx.SkillID)
+	})
+
+	commentID := insertSkillMentionComment(t, fx.IssueID,
+		"[@SkillA](mention://skill/"+fx.SkillID+") please review")
+	triggerSkillMentions(t, ctx, fx, commentID, map[string][]pgtype.UUID{
+		fx.SkillID: {parseUUIDForTest(t, fx.OtherAgentID)},
+	})
+
+	// The agent must run.
+	if got := countQueuedOrDispatched(t, fx.OtherAgentID, fx.IssueID); got != 1 {
+		t.Fatalf("expected 1 queued task on designated agent, got %d", got)
+	}
+	// And the binding must now be enabled.
+	var enabled bool
+	if err := testPool.QueryRow(ctx, `
+		SELECT enabled FROM agent_skill WHERE agent_id = $1 AND skill_id = $2
+	`, fx.OtherAgentID, fx.SkillID).Scan(&enabled); err != nil {
+		t.Fatalf("read enabled: %v", err)
+	}
+	if !enabled {
+		t.Fatalf("designation must re-enable a disabled agent_skill row; got enabled=false")
+	}
+}
+
+// TestEnqueueSkillMention_DesignatedSameAsReplyParentProducesOneTask covers
+// review finding #9 (R5 same-agent dedup). Reply to agent-2 + designate
+// agent-2 via @skill -> exactly one task for agent-2 (the implicit
+// reply-parent trigger survives, the skill duplicate is dropped). The
+// previous behavior relied on the unique-index "double-enqueue + swallowed
+// error" combination; the new explicit dedup removes that dependency.
+func TestEnqueueSkillMention_DesignatedSameAsReplyParentProducesOneTask(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	fx := newSkillMentionFixture(t)
+
+	// Bind skillA to "other" so the designation targets an agent with the skill.
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_skill (agent_id, skill_id) VALUES ($1, $2)
+	`, fx.OtherAgentID, fx.SkillID); err != nil {
+		t.Fatalf("bind other: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(),
+			`DELETE FROM agent_skill WHERE agent_id = $1 AND skill_id = $2`,
+			fx.OtherAgentID, fx.SkillID)
+	})
+
+	// Create a comment authored by "other" so the new reply's parent is an
+	// agent-2 (other) comment — making the reply's parent-author trigger
+	// target the same agent the @skill designation targets.
+	parentID := insertSkillMentionComment(t, fx.IssueID, "first revision")
+	if _, err := testPool.Exec(ctx, `
+		UPDATE comment SET author_type = 'agent', author_id = $1 WHERE id = $2
+	`, fx.OtherAgentID, parentID); err != nil {
+		t.Fatalf("re-author parent: %v", err)
+	}
+
+	// Member replies to that agent comment with a @skill mention designating
+	// the SAME agent.
+	replyContent := "[@SkillA](mention://skill/" + fx.SkillID + ") please review"
+	replyID := insertSkillMentionComment(t, fx.IssueID, replyContent)
+
+	// Re-load the parent so the reply's parent_id is wired correctly.
+	parent, err := testHandler.Queries.GetComment(ctx, parseUUID(parentID))
+	if err != nil {
+		t.Fatalf("load parent: %v", err)
+	}
+	issue, err := testHandler.Queries.GetIssue(ctx, parseUUID(fx.IssueID))
+	if err != nil {
+		t.Fatalf("load issue: %v", err)
+	}
+	comment, err := testHandler.Queries.GetComment(ctx, parseUUID(replyID))
+	if err != nil {
+		t.Fatalf("load comment: %v", err)
+	}
+
+	// Drive the create path directly so the parent relationship is honored
+	// (the existing triggerSkillMentions helper passes nil parent).
+	_ = testHandler.triggerTasksForComment(ctx, issue, comment, &parent, "member", testUserID, "", nil, map[string][]pgtype.UUID{
+		fx.SkillID: {parseUUIDForTest(t, fx.OtherAgentID)},
+	})
+
+	// Exactly one task on "other" (the dedup kept reply-parent, dropped
+	// mention_skill duplicate).
+	if got := countQueuedOrDispatched(t, fx.OtherAgentID, fx.IssueID); got != 1 {
+		t.Fatalf("R5 dedup: expected exactly 1 task on designated agent (other), got %d", got)
+	}
+	// And no spurious task on J.
+	if got := countQueuedOrDispatched(t, fx.JID, fx.IssueID); got != 0 {
+		t.Fatalf("expected 0 tasks on J (uninvolved), got %d", got)
+	}
+}
+
+// TestEnqueueSkillMention_MalformedMentionIDCarryingDesignationIsSilentlySkipped
+// covers review finding #6: a malformed-hex skill mention id carrying a
+// designation must not panic, must not bind, must not enqueue.
+func TestEnqueueSkillMention_MalformedMentionIDCarryingDesignationIsSilentlySkipped(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	fx := newSkillMentionFixture(t)
+
+	// Craft a mention with a hex-but-not-UUID id ("----" matches the regex
+	// [0-9a-fA-F-]+ but isn't a valid UUID) plus a designation entry under
+	// that same id.
+	content := "[@Bogus](mention://skill/----) please review"
+	commentID := insertSkillMentionComment(t, fx.IssueID, content)
+
+	// Must not panic.
+	triggerSkillMentions(t, ctx, fx, commentID, map[string][]pgtype.UUID{
+		"----": {parseUUIDForTest(t, fx.OtherAgentID)},
+	})
+
+	if got := countQueuedOrDispatched(t, fx.OtherAgentID, fx.IssueID); got != 0 {
+		t.Fatalf("expected 0 queued tasks on malformed mention id, got %d", got)
+	}
+	if got := countQueuedOrDispatched(t, fx.JID, fx.IssueID); got != 0 {
+		t.Fatalf("expected 0 queued tasks on J from malformed mention, got %d", got)
+	}
+}
+
 // updateCommentExpectBadRequest posts a PUT with the given body and asserts
 // the handler returns 400. Uses the router-level path so the JSON decode +
 // parseSkillMentionAgents boundary validation are both exercised.

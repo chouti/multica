@@ -121,6 +121,28 @@ func (q *Queries) GetSkill(ctx context.Context, id pgtype.UUID) (Skill, error) {
 	return i, err
 }
 
+const getAgentSkillEnabled = `-- name: GetAgentSkillEnabled :one
+SELECT enabled FROM agent_skill WHERE agent_id = $1 AND skill_id = $2
+`
+
+type GetAgentSkillEnabledParams struct {
+	AgentID pgtype.UUID `json:"agent_id"`
+	SkillID pgtype.UUID `json:"skill_id"`
+}
+
+// GetAgentSkillEnabled returns the enabled flag of the (agent_id, skill_id)
+// row. Returns pgx.ErrNoRows when the row does not exist. Used by
+// bindDesignatedSkillsForTriggers in the @skill redesign so the bind
+// pass can distinguish "row missing" (AddAgentSkill) from "row present
+// but disabled" (SetAgentSkillEnabled true) — restoring the R3 contract
+// that a designated agent actually receives the skill bundle.
+func (q *Queries) GetAgentSkillEnabled(ctx context.Context, arg GetAgentSkillEnabledParams) (bool, error) {
+	row := q.db.QueryRow(ctx, getAgentSkillEnabled, arg.AgentID, arg.SkillID)
+	var enabled bool
+	err := row.Scan(&enabled)
+	return enabled, err
+}
+
 const getSkillByWorkspaceAndName = `-- name: GetSkillByWorkspaceAndName :one
 SELECT id, workspace_id, name, description, content, config, created_by, created_at, updated_at FROM skill
 WHERE workspace_id = $1 AND name = $2

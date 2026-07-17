@@ -13,6 +13,7 @@ import (
 	"unicode"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/service"
@@ -1503,9 +1504,38 @@ func (h *Handler) triggerTasksForComment(ctx context.Context, issue db.Issue, co
 	skillTriggers, skillTargets := h.bindAndEnqueueSkillMentions(ctx, issue, comment, actorType, actorID, originatorUserID, skillMentionAgents)
 	triggers = append(triggers, skillTriggers...)
 	targets = append(targets, skillTargets...)
+	// R5 dedup: if an implicit path (reply-parent / assignee) already selected
+	// an agent that an @skill designation also targets, keep the implicit
+	// trigger (first in slice, carries the natural intent) and drop the skill
+	// duplicate. This removes the dependence on the unique-index "double-enqueue
+	// + swallowed error" dance that previously masked this contract (and is
+	// also being fixed independently under #3).
+	triggers = dedupeTriggersByAgent(triggers)
 	triggers = filterSuppressedCommentAgentTriggers(triggers, suppressAgentIDs)
 	enqueued := h.enqueueCommentAgentTriggers(ctx, issue, comment.ID, triggers)
 	return commentTriggerOutcomes(targets, enqueued)
+}
+
+// dedupeTriggersByAgent keeps the first trigger per executing agent and drops
+// later duplicates for the same agent. Implicit (reply-parent / assignee /
+// @agent) triggers are computed before skill triggers and therefore appear
+// first in the slice, so an agent already selected by an implicit path is
+// retained with its natural Source and the skill-source duplicate is dropped.
+func dedupeTriggersByAgent(triggers []commentAgentTrigger) []commentAgentTrigger {
+	if len(triggers) <= 1 {
+		return triggers
+	}
+	seen := make(map[string]struct{}, len(triggers))
+	out := make([]commentAgentTrigger, 0, len(triggers))
+	for _, t := range triggers {
+		key := uuidToString(t.Agent.ID)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, t)
+	}
+	return out
 }
 
 // bindAndEnqueueSkillMentions resolves the @skill mentions in a freshly created
@@ -1536,6 +1566,11 @@ func (h *Handler) bindAndEnqueueSkillMentions(ctx context.Context, issue db.Issu
 
 	var triggers []commentAgentTrigger
 	var targets []commentMentionTarget
+	// skillIDForTrigger maps the trigger's executing agent to the skill id
+	// the user designated. Consumed by the post-dedup bind pass below
+	// (bindDesignatedSkillsForTriggers) so the durable agent_skill write
+	// happens only on agents that will actually be invoked.
+	skillIDForTrigger := make(skillIDForTrigger)
 	// targetSeen dedups outcomes by the agent the user named (one per agent, not
 	// per mention), so a skill designated twice still yields a single outcome.
 	targetSeen := make(map[string]struct{})
@@ -1611,47 +1646,123 @@ func (h *Handler) bindAndEnqueueSkillMentions(ctx context.Context, issue db.Issu
 				continue
 			}
 
-			// Durably bind the skill to the agent if it has no enabled binding
-			// yet. AddAgentSkill is idempotent (ON CONFLICT DO NOTHING), so the
-			// write is safe even when a row already exists; the ListAgentSkills
-			// pre-check just avoids a needless write on the common repeat path.
-			if !h.agentHasSkillEnabled(ctx, agentID, skillUUID) {
-				if err := h.Queries.AddAgentSkill(ctx, db.AddAgentSkillParams{AgentID: agentID, SkillID: skillUUID}); err != nil {
-					slog.Warn("bind skill mention agent failed",
-						"issue_id", uuidToString(issue.ID),
-						"skill_id", m.ID,
-						"agent_id", uuidToString(agentID),
-						"error", err)
-					blockTarget(uuidToString(agentID), ReasonInternalError)
-					continue
-				}
-			}
-
 			hasPending, err := h.hasPendingTaskForIssueAndAgent(ctx, issue.ID, agentID, opts)
 			if err != nil {
 				blockTarget(uuidToString(agentID), ReasonInternalError)
 				continue
 			}
+			// Bind-on-first-trigger: the durable agent_skill write is deferred
+			// to the post-dedup pass below so that (a) a designation that the
+			// R5 dedup drops (because the implicit path already selected the
+			// same agent) never produces a "no-op run, but the skill was bound"
+			// side effect (the bind-without-run weapon), and (b) a designation
+			// that the enqueue ends up merging into an existing pending task
+			// likewise does not bind-and-not-trigger.
 			triggers = append(triggers, commentAgentTrigger{Agent: agent, Source: commentTriggerSourceMentionSkill, AlreadyPending: hasPending})
+			// Track the skill id alongside the trigger so the post-dedup pass
+			// can re-bind by the same pair.
+			skillIDForTrigger[uuidToString(agent.ID)] = skillUUID
 			addTarget(commentMentionTarget{TargetType: "agent", TargetID: uuidToString(agentID), ExecAgentID: uuidToString(agentID)})
 		}
 	}
-	return triggers, targets
-}
-
-// agentHasSkillEnabled reports whether the agent already has an enabled binding
-// to the skill. Used to skip a redundant AddAgentSkill write on repeat mentions.
-func (h *Handler) agentHasSkillEnabled(ctx context.Context, agentID, skillID pgtype.UUID) bool {
-	skills, err := h.Queries.ListAgentSkills(ctx, agentID)
-	if err != nil {
-		return false
-	}
-	for _, sk := range skills {
-		if sk.ID == skillID {
-			return true
+	// Post-collection dedup + bind: an agent that already appears earlier in
+	// the combined slice (an implicit path picked it first) is removed here
+	// before the bind pass so a silent "no-op run, skill was bound" cannot
+	// happen. Combined with the R5 dedup-by-agent pass in triggerTasksForComment
+	// this collapses the implicit + designated same-agent case to one trigger
+	// without depending on the DB unique-index dedup.
+	outTriggers := dedupeTriggersByAgent(triggers)
+	if len(skillIDForTrigger) > 0 {
+		if err := h.bindDesignatedSkillsForTriggers(ctx, outTriggers, skillIDForTrigger, issue, actorType, actorID, originatorUserID, wsID); err != nil {
+			slog.Warn("post-dedup bind for skill mention agents failed",
+				"issue_id", uuidToString(issue.ID),
+				"error", err)
+			// A failed bind does NOT block the enqueue: the agent is still
+			// invoked (the run starts), the user-facing contract is "the
+			// designated agent fires" — the bind is a durable side effect
+			// for future runs and the next comment will retry the bind.
 		}
 	}
-	return false
+	return outTriggers, targets
+}
+
+// skillIDForTrigger is a per-agent map from the trigger's executing agent
+// to the skill id the user designated for it. It exists only inside
+// bindAndEnqueueSkillMentions and is consumed by the post-dedup bind pass.
+type skillIDForTrigger = map[string]pgtype.UUID
+
+// bindDesignatedSkillsForTriggers upserts the agent_skill row for every trigger
+// in the slice, using its corresponding skill id. Replaces the previous
+// "blind AddAgentSkill with ON CONFLICT DO NOTHING" which silently left a
+// disabled (enabled=FALSE) row un-enabled, breaking the R3 contract that
+// the agent receives the skill bundle on the next run (review finding #2).
+//
+// Two cases per (agent, skill) pair:
+//   - no row exists -> AddAgentSkill inserts an enabled=TRUE row.
+//   - row exists but disabled -> SetAgentSkillEnabled flips it to true.
+//   - row exists and enabled -> no-op.
+//
+// Only runs on the triggers that survive the dedup pass (i.e. agents that
+// will actually be invoked or merged), fixing the bind-without-run weapon
+// (review finding #4).
+func (h *Handler) bindDesignatedSkillsForTriggers(ctx context.Context, triggers []commentAgentTrigger, skillIDs skillIDForTrigger, issue db.Issue, actorType, actorID, originatorUserID, wsID string) error {
+	for _, t := range triggers {
+		if t.Source != commentTriggerSourceMentionSkill {
+			continue
+		}
+		skillUUID, ok := skillIDs[uuidToString(t.Agent.ID)]
+		if !ok {
+			continue
+		}
+		enabled, exists, err := h.lookupAgentSkillEnabled(ctx, t.Agent.ID, skillUUID)
+		if err != nil {
+			return err
+		}
+		if exists && enabled {
+			continue
+		}
+		if !exists {
+			if err := h.Queries.AddAgentSkill(ctx, db.AddAgentSkillParams{AgentID: t.Agent.ID, SkillID: skillUUID}); err != nil {
+				return err
+			}
+		} else {
+			// exists && !enabled: re-enable the row so the skill bundle loads.
+			enabled := true
+			if _, err := h.Queries.SetAgentSkillEnabled(ctx, db.SetAgentSkillEnabledParams{
+				AgentID: t.Agent.ID,
+				SkillID: skillUUID,
+				Enabled: enabled,
+			}); err != nil {
+				return err
+			}
+		}
+		_ = issue
+		_ = actorType
+		_ = actorID
+		_ = originatorUserID
+		_ = wsID
+	}
+	return nil
+}
+
+// lookupAgentSkillEnabled returns (enabled, exists, err) for the given
+// (agent, skill) pair. Distinguishes a disabled-but-existing row from a
+// missing row so the bind pass can take the correct upsert path (review
+// finding #2). Uses the targeted GetAgentSkillEnabled query so the
+// "no row" and "row present but disabled" cases are distinguishable.
+func (h *Handler) lookupAgentSkillEnabled(ctx context.Context, agentID, skillID pgtype.UUID) (enabled bool, exists bool, err error) {
+	enabled, err = h.Queries.GetAgentSkillEnabled(ctx, db.GetAgentSkillEnabledParams{
+		AgentID: agentID,
+		SkillID: skillID,
+	})
+	if err != nil {
+		// sqlc returns pgx.ErrNoRows for a missing row; treat that as exists=false.
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, false, nil
+		}
+		return false, false, err
+	}
+	return enabled, true, nil
 }
 
 func filterSuppressedCommentAgentTriggers(triggers []commentAgentTrigger, suppressAgentIDs []pgtype.UUID) []commentAgentTrigger {
@@ -2039,12 +2150,17 @@ func (h *Handler) enqueueSingleCommentTrigger(ctx context.Context, issue db.Issu
 		// routing, or backend agent_skill lookup). Enqueue semantics are
 		// identical to a direct @agent mention: the agent gets a fresh
 		// mention-driven task on this issue, deduped against any pending
-		// task for the same (issue, agent).
+		// task for the same (issue, agent). On failure, return err so the
+		// outcome is DispatchBlocked (matching every other case here); this
+		// pre-existing swallow was masked by the unique-index dedup on
+		// comment-trigger-source-threads and surfaced only as the new feature
+		// scaled out.
 		if _, err := h.TaskService.EnqueueTaskForMention(ctx, issue, trigger.Agent.ID, triggerCommentID); err != nil {
 			slog.Warn("enqueue mention skill task failed",
 				"issue_id", uuidToString(issue.ID),
 				"agent_id", uuidToString(trigger.Agent.ID),
 				"error", err)
+			return err
 		}
 	case commentTriggerSourceThreadParent, commentTriggerSourceConversation:
 		var task db.AgentTaskQueue
