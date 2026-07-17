@@ -70,6 +70,8 @@ function ReplyInput({
   const [submitting, setSubmitting] = useState(false);
   const [suppressedAgentIds, setSuppressedAgentIds] = useState<Set<string>>(() => new Set());
   const [skillMentionAgents, setSkillMentionAgents] = useState<Record<string, string[]>>({});
+  // Composer-owned popover-open state, keyed by skill id (see comment-input).
+  const [openPopoverFor, setOpenPopoverFor] = useState<string | null>(null);
   const triggerPreview = useCommentTriggerPreview({ issueId, parentId, content });
   // Attachments uploaded in this composer session — see CommentInput for the
   // rationale (drives both submit-time attachment_ids and editor previews).
@@ -249,6 +251,8 @@ function ReplyInput({
               wsId,
               skillMentionAgents,
               onSkillMentionChange: handleSkillMentionChange,
+              openPopoverFor,
+              setOpenPopoverFor,
             }}
           />
         </div>

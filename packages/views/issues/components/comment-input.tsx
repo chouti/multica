@@ -46,6 +46,10 @@ function CommentInput({ issueId, onSubmit, editorComponent: EditorComponent = Co
   const [submitting, setSubmitting] = useState(false);
   const [suppressedAgentIds, setSuppressedAgentIds] = useState<Set<string>>(() => new Set());
   const [skillMentionAgents, setSkillMentionAgents] = useState<Record<string, string[]>>({});
+  // Composer-owned popover-open state, keyed by skill id. Hoisted from
+  // the per-NodeView useState so a Tiptap NodeView recreation does not
+  // close the picker mid-selection (review finding #14).
+  const [openPopoverFor, setOpenPopoverFor] = useState<string | null>(null);
   const triggerPreview = useCommentTriggerPreview({ issueId, content });
   // Attachments uploaded in this composer session. Drives both:
   //  - submit-time `attachment_ids` payload (filtered to URLs still in markdown)
@@ -234,6 +238,8 @@ function CommentInput({ issueId, onSubmit, editorComponent: EditorComponent = Co
             wsId,
             skillMentionAgents,
             onSkillMentionChange: handleSkillMentionChange,
+            openPopoverFor,
+            setOpenPopoverFor,
           }}
         />
       </div>

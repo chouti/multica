@@ -17,7 +17,6 @@
  * wrapper is the outermost inline element.
  */
 
-import { useState } from "react";
 import { NodeViewWrapper } from "@tiptap/react";
 import type { NodeViewProps } from "@tiptap/react";
 import { useWorkspacePaths } from "@multica/core/paths";
@@ -96,9 +95,17 @@ export function MentionView({ node }: NodeViewProps) {
 }
 
 function SkillMention({ skillId, name }: { skillId: string; name: string }) {
+  // Popover open state is hoisted into the composer-owned SkillMentionContext
+  // so a Tiptap NodeView recreation (which can happen on surrounding
+  // transactions) does not close the picker mid-selection. See review
+  // finding #14.
   const context = useSkillMentionContext();
-  const [open, setOpen] = useState(false);
   const selectedAgentIds = context?.skillMentionAgents[skillId] ?? [];
+  const open = context?.openPopoverFor === skillId;
+  const setOpen = (next: boolean) => {
+    if (!context) return;
+    context.setOpenPopoverFor(next ? skillId : null);
+  };
 
   const chip = (
     <SkillMentionChip

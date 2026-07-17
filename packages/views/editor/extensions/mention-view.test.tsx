@@ -101,6 +101,8 @@ function makeSkillContext(
     wsId: "ws-1",
     skillMentionAgents: {},
     onSkillMentionChange: vi.fn(),
+    openPopoverFor: null,
+    setOpenPopoverFor: vi.fn(),
     ...overrides,
   };
 }

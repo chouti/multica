@@ -131,6 +131,8 @@ interface ContentEditorProps {
     wsId: string;
     skillMentionAgents: Record<string, string[]>;
     onSkillMentionChange: (skillId: string, agentIds: string[]) => void;
+    openPopoverFor: string | null;
+    setOpenPopoverFor: (skillId: string | null) => void;
   };
   /**
    * Fired whenever this editor's "any attachment still uploading" answer

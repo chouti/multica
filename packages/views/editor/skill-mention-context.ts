@@ -22,6 +22,16 @@ export interface SkillMentionContextValue {
   skillMentionAgents: Record<string, string[]>;
   /** Update the composer-held designation map for one skill mention. */
   onSkillMentionChange: (skillId: string, agentIds: string[]) => void;
+  /**
+   * Currently-open skill picker popover, keyed by skill id. When the
+   * editor recreates a NodeView (e.g. on surrounding transactions that
+   * tear down + rebuild the React subtree), the local useState is lost;
+   * hoisting this into composer state keeps the popover open across the
+   * recreation. Only one picker is open at a time — selecting another
+   * chip moves the open state.
+   */
+  openPopoverFor: string | null;
+  setOpenPopoverFor: (skillId: string | null) => void;
 }
 
 export const SkillMentionContext = createContext<SkillMentionContextValue | null>(null);
