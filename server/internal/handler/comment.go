@@ -1560,7 +1560,21 @@ func (h *Handler) bindAndEnqueueSkillMentions(ctx context.Context, issue db.Issu
 			// No designation for this mention: silent no-op (R4/R7).
 			continue
 		}
-		skillUUID := parseUUID(m.ID)
+		// Per repo UUID rules: parseUUID (panicking) is only for trusted
+		// round-trips. m.ID here is request-controlled content (the mention
+		// regex admits any hex+'-' run plus the literal "all"), so a malformed
+		// or "all" id would otherwise panic and 500 after the comment row has
+		// already committed. Use the safe variant and skip defensively.
+		if m.ID == "all" {
+			continue
+		}
+		skillUUID, err := util.ParseUUID(m.ID)
+		if err != nil {
+			// Malformed skill mention id carrying a designation: silently skip
+			// this designation so a bogus id never leaks target existence or
+			// aborts the comment.
+			continue
+		}
 		if _, err := h.Queries.GetSkillInWorkspace(ctx, db.GetSkillInWorkspaceParams{
 			ID:          skillUUID,
 			WorkspaceID: issue.WorkspaceID,
