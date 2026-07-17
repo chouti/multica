@@ -442,24 +442,31 @@ func parseUUIDSliceOrBadRequest(w http.ResponseWriter, ids []string, fieldName s
 	return uuids, true
 }
 
-// parseSkillMentionAgents decodes the skill→agent routing map sent by the
-// frontend's smart-routing layer (assignee > recency > online). Each key is
-// a skill ID from the mention link; each value is the agent the frontend
-// resolved for it. Invalid UUIDs in the map abort with a 400 so a single
-// malformed entry doesn't slip through and trigger the wrong agent. An empty
-// map is valid — it just means the client opted into backend-only routing.
-func parseSkillMentionAgents(w http.ResponseWriter, in map[string]string, fieldName string) (map[string]pgtype.UUID, bool) {
+// parseSkillMentionAgents decodes the skill→agents designation map sent by the
+// frontend. Each key is a skill mention ID (the uuid serialized in the
+// mention://skill/<id> link); each value is the list of agent IDs the user
+// explicitly designated to receive that skill on submit. The backend binds each
+// designated agent to the skill (idempotently) and enqueues it when the comment
+// is created — see Handler.bindAndEnqueueSkillMentions. A mention with no
+// designation (absent key or empty list) is a silent no-op. Invalid agent UUIDs
+// in the map abort with a 400 so a single malformed entry doesn't slip through
+// and trigger the wrong agent.
+func parseSkillMentionAgents(w http.ResponseWriter, in map[string][]string, fieldName string) (map[string][]pgtype.UUID, bool) {
 	if len(in) == 0 {
 		return nil, true
 	}
-	out := make(map[string]pgtype.UUID, len(in))
-	for skillID, agentID := range in {
-		u, err := util.ParseUUID(agentID)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, "invalid "+fieldName)
-			return nil, false
+	out := make(map[string][]pgtype.UUID, len(in))
+	for skillID, agentIDs := range in {
+		uuids := make([]pgtype.UUID, 0, len(agentIDs))
+		for _, agentID := range agentIDs {
+			u, err := util.ParseUUID(agentID)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, "invalid "+fieldName)
+				return nil, false
+			}
+			uuids = append(uuids, u)
 		}
-		out[skillID] = u
+		out[skillID] = uuids
 	}
 	return out, true
 }

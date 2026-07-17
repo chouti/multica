@@ -9,15 +9,20 @@ import (
 )
 
 // skillMentionFixture wires the seeded workspace-visible agent ("Handler Test
-// Agent") to a workspace skill so we can exercise the @skill mention path on
-// the computeCommentAgentTriggers → resolveMentionedAgentCommentTriggers
-// → resolveSkillMentionTrigger chain. The tests below lock in the U7 contract:
+// Agent", J) to skillA and a second agent ("Handler Skill Other") to skillB so
+// we can exercise the @skill mention path on the create-only
+// triggerTasksForComment → bindAndEnqueueSkillMentions chain. The tests below
+// lock in the explicit-designation contract:
 //
-//   - @skill mention with a frontend-resolved agent enqueues that agent
-//   - @skill mention without metadata falls back to the agent_skill lookup
-//   - issue assignee with the skill wins the tie (R13)
+//   - a designated agent is enqueued even when another agent holds the binding,
+//     and is itself bound to the skill on submit
+//   - a @skill mention with NO designation triggers nothing (silent), even when
+//     an agent_skill binding exists
+//   - a designated-but-unbound agent is bound then triggered
+//   - an unavailable designated agent (archived) is skipped and does not abort
+//     the other valid designations
 //   - dedup prevents double-triggering against a pending task
-//   - multiple @skill mentions resolve independently
+//   - multiple @skill mentions each enqueue their own designated agent
 //   - unknown / invalid skill IDs do not crash the comment handler
 type skillMentionFixture struct {
 	JID           string
@@ -66,11 +71,9 @@ func newSkillMentionFixture(t *testing.T) skillMentionFixture {
 		t.Fatalf("next issue number: %v", err)
 	}
 
-	// The issue is unassigned so the resolveSkillMentionTrigger falls
-	// through to the agent_skill lookup rather than taking the
-	// routeAssigneeFallback shortcut. Tests that want to assert the
-	// assignee-wins-the-tie path update the assignee explicitly after
-	// creating the fixture.
+	// The issue is unassigned so the implicit (assignee / reply-parent)
+	// routing never fires and every queued task we observe comes from the
+	// explicit skill designation under test.
 	var issueID string
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO issue (workspace_id, creator_type, creator_id, title, number)
@@ -88,8 +91,9 @@ func newSkillMentionFixture(t *testing.T) skillMentionFixture {
 	skillA := insertHandlerTestSkill(t, "skill-mention-a", "skill A")
 	skillB := insertHandlerTestSkill(t, "skill-mention-b", "skill B")
 
-	// Bind skillA to the seeded agent J. This is what the @skill mention
-	// will resolve to when no frontend routing is supplied.
+	// Bind skillA to the seeded agent J. Tests that assert "the designated
+	// agent wins over the existing binding" designate a DIFFERENT agent and
+	// confirm J's binding does not pull J in.
 	if _, err := testPool.Exec(ctx, `
 		INSERT INTO agent_skill (agent_id, skill_id) VALUES ($1, $2)
 	`, jID, skillA); err != nil {
@@ -100,8 +104,7 @@ func newSkillMentionFixture(t *testing.T) skillMentionFixture {
 	})
 
 	// Create a second agent for the multi-skill scenario. Skill B is bound
-	// only to this other agent, so a comment that mentions both skills
-	// must enqueue two distinct triggers.
+	// only to this other agent.
 	otherAgentID := createHandlerTestAgent(t, "Handler Skill Other", nil)
 	otherRuntime := handlerTestRuntimeID(t)
 	if _, err := testPool.Exec(ctx, `
@@ -132,7 +135,7 @@ func newSkillMentionFixture(t *testing.T) skillMentionFixture {
 
 // insertSkillMentionComment writes a comment whose content is the supplied
 // mention text. The author is the seeded member (testUserID) — skill mentions
-// from members are the user flow the plan calls out as the AE2 case.
+// from members are the user flow the feature targets.
 func insertSkillMentionComment(t *testing.T, issueID, content string) string {
 	t.Helper()
 	var id string
@@ -146,26 +149,38 @@ func insertSkillMentionComment(t *testing.T, issueID, content string) string {
 	return id
 }
 
-// triggerSkillMentions drives the full enqueue path that production uses, so
-// these integration tests assert end-to-end enqueue side effects (not just
-// what resolveSkillMentionTrigger returns). Mirrors
-// enqueueMentionedAgentTasksForTest.
-func triggerSkillMentions(t *testing.T, ctx context.Context, fx skillMentionFixture, commentID string, skillAgents map[string]pgtype.UUID) {
+// triggerSkillMentions drives the REAL create path — triggerTasksForComment —
+// so these integration tests exercise the bind-and-trigger side effect (the
+// durable agent_skill insert plus the enqueue), not the read-only compute path
+// the preview uses. skillAgents is the parsed skill_mention_agents payload.
+func triggerSkillMentions(t *testing.T, ctx context.Context, fx skillMentionFixture, commentID string, skillAgents map[string][]pgtype.UUID) []CommentTriggerOutcome {
 	t.Helper()
 	comment, err := testHandler.Queries.GetComment(ctx, parseUUID(commentID))
 	if err != nil {
 		t.Fatalf("load comment: %v", err)
 	}
-	triggers, _ := testHandler.computeCommentAgentTriggers(ctx, fx.Issue, comment.Content, nil, "member", testUserID, commentTriggerComputeOptions{
-		SkillMentionAgents: skillAgents,
-	})
-	testHandler.enqueueCommentAgentTriggers(ctx, fx.Issue, comment.ID, triggers)
+	// Zero-value parent / suppress list / originator: the fixture's author is a
+	// member, so originator gating keys on the member id directly.
+	return testHandler.triggerTasksForComment(ctx, fx.Issue, comment, nil, "member", testUserID, "", nil, skillAgents)
 }
 
-// TestEnqueueSkillMention_UsesFrontendResolvedAgent proves that when the
-// frontend's smart routing supplies a target agent via skill_mention_agents,
-// the backend enqueues exactly that agent — even if it differs from the
-// agent_skill table's first binding. This is the R12 happy path.
+// countAgentSkillBindingsFor reports how many agent_skill rows link the agent to
+// the skill — used to assert the bind-on-submit side effect.
+func countAgentSkillBindingsFor(t *testing.T, agentID, skillID string) int {
+	t.Helper()
+	var n int
+	if err := testPool.QueryRow(context.Background(), `
+		SELECT count(*) FROM agent_skill WHERE agent_id = $1 AND skill_id = $2
+	`, agentID, skillID).Scan(&n); err != nil {
+		t.Fatalf("count agent_skill bindings: %v", err)
+	}
+	return n
+}
+
+// TestEnqueueSkillMention_UsesFrontendResolvedAgent proves the explicit-
+// designation happy path: the frontend designates "other" (not J, even though J
+// holds the agent_skill binding), and the backend enqueues exactly "other".
+// Because "other" was NOT bound to skillA, the create path must also bind it.
 func TestEnqueueSkillMention_UsesFrontendResolvedAgent(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
@@ -176,26 +191,32 @@ func TestEnqueueSkillMention_UsesFrontendResolvedAgent(t *testing.T) {
 	commentID := insertSkillMentionComment(t, fx.IssueID,
 		"[@SkillA](mention://skill/"+fx.SkillID+") please review")
 
-	// Frontend pre-resolves to "other" (not J, even though J has the
-	// binding). Backend must honor this mapping and enqueue "other".
-	resolved := parseUUIDForTest(t, fx.OtherAgentID)
-	triggerSkillMentions(t, ctx, fx, commentID, map[string]pgtype.UUID{
-		fx.SkillID: resolved,
+	// "other" starts unbound to skillA.
+	if got := countAgentSkillBindingsFor(t, fx.OtherAgentID, fx.SkillID); got != 0 {
+		t.Fatalf("precondition: expected other agent unbound to skillA, got %d bindings", got)
+	}
+
+	triggerSkillMentions(t, ctx, fx, commentID, map[string][]pgtype.UUID{
+		fx.SkillID: {parseUUIDForTest(t, fx.OtherAgentID)},
 	})
 
 	if got := countQueuedOrDispatched(t, fx.OtherAgentID, fx.IssueID); got != 1 {
-		t.Fatalf("expected 1 queued task on frontend-resolved agent, got %d", got)
+		t.Fatalf("expected 1 queued task on designated agent, got %d", got)
 	}
 	if got := countQueuedOrDispatched(t, fx.JID, fx.IssueID); got != 0 {
-		t.Fatalf("expected 0 queued tasks on agent_skill binding (frontend overrode it), got %d", got)
+		t.Fatalf("expected 0 queued tasks on agent_skill binding (designation overrode it), got %d", got)
+	}
+	// Bind-on-submit: the designated agent must now be bound to skillA.
+	if got := countAgentSkillBindingsFor(t, fx.OtherAgentID, fx.SkillID); got != 1 {
+		t.Fatalf("expected designated agent bound to skillA after submit, got %d bindings", got)
 	}
 }
 
-// TestEnqueueSkillMention_FallsBackToAgentSkillBinding is the no-metadata
-// path: when the frontend does not supply skill_mention_agents, the backend
-// must resolve via the agent_skill junction table. The seeded binding is J,
-// so we expect exactly one queued task on J.
-func TestEnqueueSkillMention_FallsBackToAgentSkillBinding(t *testing.T) {
+// TestEnqueueSkillMention_NoDesignationIsSilent reverses the old fallback: a
+// @skill mention with NO skill_mention_agents entry now enqueues NOTHING, even
+// though J holds an agent_skill binding. The backend never reverse-looks-up the
+// junction table to pick a target.
+func TestEnqueueSkillMention_NoDesignationIsSilent(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
 	}
@@ -207,34 +228,25 @@ func TestEnqueueSkillMention_FallsBackToAgentSkillBinding(t *testing.T) {
 
 	triggerSkillMentions(t, ctx, fx, commentID, nil)
 
-	if got := countQueuedOrDispatched(t, fx.JID, fx.IssueID); got != 1 {
-		t.Fatalf("expected 1 queued task on agent_skill binding, got %d", got)
+	if got := countQueuedOrDispatched(t, fx.JID, fx.IssueID); got != 0 {
+		t.Fatalf("expected 0 queued tasks with no designation (binding must not be consulted), got %d", got)
+	}
+	if got := countQueuedOrDispatched(t, fx.OtherAgentID, fx.IssueID); got != 0 {
+		t.Fatalf("expected 0 queued tasks with no designation, got %d", got)
 	}
 }
 
-// TestEnqueueSkillMention_AssigneeWithSkillWins covers R13 in its
-// competition form: two agents have the skill, the issue's assignee is one
-// of them, and the assignee must be selected over the other candidate.
-func TestEnqueueSkillMention_AssigneeWithSkillWins(t *testing.T) {
+// TestEnqueueSkillMention_NoDesignationIgnoresAssignee confirms R13 is gone:
+// without a designation, a @skill mention fires nothing regardless of who the
+// issue assignee is or what skills they hold.
+func TestEnqueueSkillMention_NoDesignationIgnoresAssignee(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
 	}
 	ctx := context.Background()
 	fx := newSkillMentionFixture(t)
 
-	// Bind skill A to BOTH J and the other agent.
-	if _, err := testPool.Exec(ctx, `
-		INSERT INTO agent_skill (agent_id, skill_id) VALUES ($1, $2)
-	`, fx.OtherAgentID, fx.SkillID); err != nil {
-		t.Fatalf("bind skillA to other agent: %v", err)
-	}
-	t.Cleanup(func() {
-		testPool.Exec(context.Background(),
-			`DELETE FROM agent_skill WHERE agent_id = $1 AND skill_id = $2`,
-			fx.OtherAgentID, fx.SkillID)
-	})
-
-	// Make J the issue assignee — J must win the tie.
+	// Make J (which holds skillA) the issue assignee.
 	if _, err := testPool.Exec(ctx, `
 		UPDATE issue SET assignee_type = 'agent', assignee_id = $1 WHERE id = $2
 	`, fx.JID, fx.IssueID); err != nil {
@@ -247,18 +259,15 @@ func TestEnqueueSkillMention_AssigneeWithSkillWins(t *testing.T) {
 
 	triggerSkillMentions(t, ctx, fx, commentID, nil)
 
-	if got := countQueuedOrDispatched(t, fx.JID, fx.IssueID); got != 1 {
-		t.Fatalf("expected 1 queued task on assignee J, got %d", got)
-	}
-	if got := countQueuedOrDispatched(t, fx.OtherAgentID, fx.IssueID); got != 0 {
-		t.Fatalf("expected 0 queued tasks on non-assignee binding (other), got %d", got)
+	if got := countQueuedOrDispatched(t, fx.JID, fx.IssueID); got != 0 {
+		t.Fatalf("expected 0 queued tasks with no designation even for the assignee, got %d", got)
 	}
 }
 
 // TestEnqueueSkillMention_DedupesAgainstPendingTask locks in that the
-// hasPendingTaskForIssueAndAgent dedupe applies to the new skill branch
-// just like it does for @agent / @squad mentions. A queued task must block
-// a second queued task; the second enqueue must report AlreadyPending=true.
+// hasPendingTaskForIssueAndAgent dedupe applies to the skill designation path
+// just like it does for @agent / @squad mentions. A queued task must block a
+// second queued task for the same (issue, agent).
 func TestEnqueueSkillMention_DedupesAgainstPendingTask(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
@@ -266,8 +275,8 @@ func TestEnqueueSkillMention_DedupesAgainstPendingTask(t *testing.T) {
 	ctx := context.Background()
 	fx := newSkillMentionFixture(t)
 
-	// Seed a queued task on J — simulates a previous @agent or @skill
-	// mention that already enqueued against this issue.
+	// Seed a queued task on J — simulates a previous mention that already
+	// enqueued against this issue.
 	if _, err := testPool.Exec(ctx, `
 		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status)
 		VALUES ($1, $2, $3, 'queued')
@@ -278,7 +287,9 @@ func TestEnqueueSkillMention_DedupesAgainstPendingTask(t *testing.T) {
 	commentID := insertSkillMentionComment(t, fx.IssueID,
 		"[@SkillA](mention://skill/"+fx.SkillID+") please review")
 
-	triggerSkillMentions(t, ctx, fx, commentID, nil)
+	triggerSkillMentions(t, ctx, fx, commentID, map[string][]pgtype.UUID{
+		fx.SkillID: {parseUUIDForTest(t, fx.JID)},
+	})
 
 	if got := countQueuedOrDispatched(t, fx.JID, fx.IssueID); got != 1 {
 		t.Fatalf("expected dedupe (still 1 queued task), got %d", got)
@@ -286,8 +297,8 @@ func TestEnqueueSkillMention_DedupesAgainstPendingTask(t *testing.T) {
 }
 
 // TestEnqueueSkillMention_MultipleSkillMentionsIndependent verifies that two
-// @skill mentions in one comment each enqueue independently — one queued
-// task per distinct resolved agent, no merging across skills.
+// @skill mentions in one comment each enqueue their own designated agent — one
+// queued task per distinct agent, no merging across skills.
 func TestEnqueueSkillMention_MultipleSkillMentionsIndependent(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
@@ -299,22 +310,23 @@ func TestEnqueueSkillMention_MultipleSkillMentionsIndependent(t *testing.T) {
 		"[@SkillB](mention://skill/" + fx.SecondSkillID + ") please review"
 	commentID := insertSkillMentionComment(t, fx.IssueID, content)
 
-	triggerSkillMentions(t, ctx, fx, commentID, nil)
+	triggerSkillMentions(t, ctx, fx, commentID, map[string][]pgtype.UUID{
+		fx.SkillID:       {parseUUIDForTest(t, fx.JID)},
+		fx.SecondSkillID: {parseUUIDForTest(t, fx.OtherAgentID)},
+	})
 
-	// J has skill A → 1 task on J.
 	if got := countQueuedOrDispatched(t, fx.JID, fx.IssueID); got != 1 {
-		t.Fatalf("expected 1 queued task on J (skill A), got %d", got)
+		t.Fatalf("expected 1 queued task on J (skill A designation), got %d", got)
 	}
-	// Other agent has skill B → 1 task on other.
 	if got := countQueuedOrDispatched(t, fx.OtherAgentID, fx.IssueID); got != 1 {
-		t.Fatalf("expected 1 queued task on other (skill B), got %d", got)
+		t.Fatalf("expected 1 queued task on other (skill B designation), got %d", got)
 	}
 }
 
 // TestEnqueueSkillMention_UnknownSkillIDIsNoCrash confirms the failure
-// contract: a mention whose skill ID does not exist in this workspace must
-// not abort the trigger computation, must not enqueue a task, and must not
-// surface as a 5xx to the comment writer.
+// contract: a mention whose skill ID does not exist in this workspace must not
+// abort the trigger computation, must not enqueue a task, and must not bind
+// anything — even if the (bogus) mention carries a designation.
 func TestEnqueueSkillMention_UnknownSkillIDIsNoCrash(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
@@ -326,8 +338,10 @@ func TestEnqueueSkillMention_UnknownSkillIDIsNoCrash(t *testing.T) {
 	commentID := insertSkillMentionComment(t, fx.IssueID,
 		"[@Unknown](mention://skill/"+bogusID+")")
 
-	// Must not panic.
-	triggerSkillMentions(t, ctx, fx, commentID, nil)
+	// Must not panic, even with a designation pointing at a real agent.
+	triggerSkillMentions(t, ctx, fx, commentID, map[string][]pgtype.UUID{
+		bogusID: {parseUUIDForTest(t, fx.JID)},
+	})
 
 	if got := countQueuedOrDispatched(t, fx.JID, fx.IssueID); got != 0 {
 		t.Fatalf("expected 0 queued tasks on bogus skill, got %d", got)
@@ -335,13 +349,15 @@ func TestEnqueueSkillMention_UnknownSkillIDIsNoCrash(t *testing.T) {
 	if got := countQueuedOrDispatched(t, fx.OtherAgentID, fx.IssueID); got != 0 {
 		t.Fatalf("expected 0 queued tasks on bogus skill, got %d", got)
 	}
+	if got := countAgentSkillBindingsFor(t, fx.JID, bogusID); got != 0 {
+		t.Fatalf("expected no binding written for bogus skill, got %d", got)
+	}
 }
 
-// TestEnqueueSkillMention_UnboundSkillSilentlyDropped covers the R13 edge
-// case: a real skill exists, but no agent has it bound in the workspace.
-// The mention must be silently dropped — same contract as @member mentions —
-// and no error must leak through the trigger computation.
-func TestEnqueueSkillMention_UnboundSkillSilentlyDropped(t *testing.T) {
+// TestEnqueueSkillMention_UnboundSkillBindsAndTriggers reverses the old
+// "unbound skill silently dropped" case: a designated-but-unbound agent is now
+// BOUND (new agent_skill row) then TRIGGERED.
+func TestEnqueueSkillMention_UnboundSkillBindsAndTriggers(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
 	}
@@ -354,14 +370,152 @@ func TestEnqueueSkillMention_UnboundSkillSilentlyDropped(t *testing.T) {
 	commentID := insertSkillMentionComment(t, fx.IssueID,
 		"[@SkillC](mention://skill/"+skillC+")")
 
+	triggerSkillMentions(t, ctx, fx, commentID, map[string][]pgtype.UUID{
+		skillC: {parseUUIDForTest(t, fx.OtherAgentID)},
+	})
+
+	if got := countQueuedOrDispatched(t, fx.OtherAgentID, fx.IssueID); got != 1 {
+		t.Fatalf("expected 1 queued task on designated (previously unbound) agent, got %d", got)
+	}
+	if got := countAgentSkillBindingsFor(t, fx.OtherAgentID, skillC); got != 1 {
+		t.Fatalf("expected designated agent bound to skillC, got %d bindings", got)
+	}
+	// Cleanup the binding this test created via the create path.
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(),
+			`DELETE FROM agent_skill WHERE agent_id = $1 AND skill_id = $2`,
+			fx.OtherAgentID, skillC)
+	})
+}
+
+// TestEnqueueSkillMention_SkillWithNoDesignationNoBindingsIsSilent covers the
+// remaining silent case: a real skill with neither a designation nor any
+// binding produces no task.
+func TestEnqueueSkillMention_SkillWithNoDesignationNoBindingsIsSilent(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	fx := newSkillMentionFixture(t)
+
+	skillC := insertHandlerTestSkill(t, "skill-mention-c", "no bindings")
+
+	commentID := insertSkillMentionComment(t, fx.IssueID,
+		"[@SkillC](mention://skill/"+skillC+")")
+
 	triggerSkillMentions(t, ctx, fx, commentID, nil)
 
 	if got := countQueuedOrDispatched(t, fx.JID, fx.IssueID); got != 0 {
-		t.Fatalf("expected 0 queued tasks on unbound skill, got %d on J", got)
+		t.Fatalf("expected 0 queued tasks on undesigned/unbound skill, got %d on J", got)
 	}
 	if got := countQueuedOrDispatched(t, fx.OtherAgentID, fx.IssueID); got != 0 {
-		t.Fatalf("expected 0 queued tasks on unbound skill, got %d on other", got)
+		t.Fatalf("expected 0 queued tasks on undesigned/unbound skill, got %d on other", got)
 	}
+}
+
+// TestEnqueueSkillMention_UnavailableAgentSkippedOthersSurvive designates both
+// an archived agent and a healthy agent for the same skill: the archived one is
+// skipped (no task, no binding) and does NOT abort the healthy designation.
+func TestEnqueueSkillMention_UnavailableAgentSkippedOthersSurvive(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	fx := newSkillMentionFixture(t)
+
+	// A third agent that we then archive so it is unavailable.
+	archivedAgentID := createHandlerTestAgent(t, "Handler Skill Archived", nil)
+	if _, err := testPool.Exec(ctx, `
+		UPDATE agent SET archived_at = now() WHERE id = $1
+	`, archivedAgentID); err != nil {
+		t.Fatalf("archive agent: %v", err)
+	}
+
+	commentID := insertSkillMentionComment(t, fx.IssueID,
+		"[@SkillA](mention://skill/"+fx.SkillID+") please review")
+
+	triggerSkillMentions(t, ctx, fx, commentID, map[string][]pgtype.UUID{
+		fx.SkillID: {
+			parseUUIDForTest(t, archivedAgentID),
+			parseUUIDForTest(t, fx.OtherAgentID),
+		},
+	})
+
+	// Archived agent: no task, no binding.
+	if got := countQueuedOrDispatched(t, archivedAgentID, fx.IssueID); got != 0 {
+		t.Fatalf("expected 0 queued tasks on archived agent, got %d", got)
+	}
+	if got := countAgentSkillBindingsFor(t, archivedAgentID, fx.SkillID); got != 0 {
+		t.Fatalf("expected archived agent NOT bound, got %d bindings", got)
+	}
+	// Healthy designated agent still fires and is bound.
+	if got := countQueuedOrDispatched(t, fx.OtherAgentID, fx.IssueID); got != 1 {
+		t.Fatalf("expected 1 queued task on healthy designated agent, got %d", got)
+	}
+	if got := countAgentSkillBindingsFor(t, fx.OtherAgentID, fx.SkillID); got != 1 {
+		t.Fatalf("expected healthy designated agent bound, got %d bindings", got)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(),
+			`DELETE FROM agent_skill WHERE agent_id = $1 AND skill_id = $2`,
+			fx.OtherAgentID, fx.SkillID)
+	})
+}
+
+// TestEnqueueSkillMention_EnqueuedOutcomeSurfaces checks the returned outcome:
+// a designated agent that enqueues appears as a queued "agent" outcome, and an
+// unavailable designation surfaces as blocked with a target_unavailable reason.
+func TestEnqueueSkillMention_EnqueuedOutcomeSurfaces(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	fx := newSkillMentionFixture(t)
+
+	archivedAgentID := createHandlerTestAgent(t, "Handler Skill Archived", nil)
+	if _, err := testPool.Exec(ctx, `
+		UPDATE agent SET archived_at = now() WHERE id = $1
+	`, archivedAgentID); err != nil {
+		t.Fatalf("archive agent: %v", err)
+	}
+
+	commentID := insertSkillMentionComment(t, fx.IssueID,
+		"[@SkillA](mention://skill/"+fx.SkillID+") please review")
+
+	outcomes := triggerSkillMentions(t, ctx, fx, commentID, map[string][]pgtype.UUID{
+		fx.SkillID: {
+			parseUUIDForTest(t, fx.OtherAgentID),
+			parseUUIDForTest(t, archivedAgentID),
+		},
+	})
+
+	var healthy, archived *CommentTriggerOutcome
+	for i := range outcomes {
+		o := outcomes[i]
+		switch o.TargetID {
+		case fx.OtherAgentID:
+			healthy = &o
+		case archivedAgentID:
+			archived = &o
+		}
+	}
+	if healthy == nil {
+		t.Fatalf("expected an outcome for the healthy designated agent, got %+v", outcomes)
+	}
+	if healthy.TargetType != "agent" || healthy.Status != DispatchQueued {
+		t.Fatalf("expected healthy designated agent queued, got %+v", *healthy)
+	}
+	if archived == nil {
+		t.Fatalf("expected an outcome for the archived designated agent, got %+v", outcomes)
+	}
+	if archived.Status != DispatchBlocked || archived.ReasonCode != ReasonTargetUnavailable {
+		t.Fatalf("expected archived designated agent blocked/target_unavailable, got %+v", *archived)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(),
+			`DELETE FROM agent_skill WHERE agent_id = $1 AND skill_id = $2`,
+			fx.OtherAgentID, fx.SkillID)
+	})
 }
 
 // parseUUIDForTest wraps parseUUID so the test file does not have to import
