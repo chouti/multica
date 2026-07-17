@@ -86,6 +86,10 @@
   "file_card": {
     "uploading": "Uploading {{filename}}"
   },
+  "upload": {
+    "failed": "Couldn't upload {{filename}}: {{reason}}",
+    "in_progress": "Uploading…"
+  },
   "title_editor": {
     "title_aria_label": "Title"
   },
