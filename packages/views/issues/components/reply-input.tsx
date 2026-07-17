@@ -9,6 +9,7 @@ import type { Attachment } from "@multica/core/types";
 import { contentReferencesAttachment } from "@multica/core/types";
 import { formatShortcut, useShortcut } from "@multica/core/shortcuts";
 import { useCommentDraftStore, type CommentDraftKey } from "@multica/core/issues/stores";
+import { useWorkspaceId } from "@multica/core/hooks";
 import { cn } from "@multica/ui/lib/utils";
 import type { AvatarSize } from "@multica/ui/lib/avatar-size";
 import { useT } from "../../i18n";
@@ -51,6 +52,7 @@ function ReplyInput({
 }: ReplyInputProps) {
   const { t } = useT("issues");
   const { t: tEditor } = useT("editor");
+  const wsId = useWorkspaceId();
   const sendShortcut = useShortcut("send");
   const placeholderText = placeholder ?? t(($) => $.reply.placeholder);
   const editorRef = useRef<ContentEditorRef>(null);
@@ -67,6 +69,7 @@ function ReplyInput({
   const [isEmpty, setIsEmpty] = useState(!initialDraft?.trim());
   const [submitting, setSubmitting] = useState(false);
   const [suppressedAgentIds, setSuppressedAgentIds] = useState<Set<string>>(() => new Set());
+  const [skillMentionAgents, setSkillMentionAgents] = useState<Record<string, string[]>>({});
   const triggerPreview = useCommentTriggerPreview({ issueId, parentId, content });
   // Attachments uploaded in this composer session — see CommentInput for the
   // rationale (drives both submit-time attachment_ids and editor previews).
@@ -111,6 +114,7 @@ function ReplyInput({
 
   useEffect(() => {
     setSuppressedAgentIds(new Set());
+    setSkillMentionAgents({});
   }, [issueId, parentId]);
 
   useEffect(() => {
@@ -130,6 +134,25 @@ function ReplyInput({
     });
   }, []);
 
+  const handleSkillMentionChange = useCallback((skillId: string, agentIds: string[]) => {
+    setSkillMentionAgents((prev) => {
+      const next = { ...prev };
+      if (agentIds.length > 0) next[skillId] = agentIds;
+      else delete next[skillId];
+      return next;
+    });
+  }, []);
+
+  // Text-gesture consistency: when a skill mention disappears from the editor
+  // document, drop its designation state too.
+  const syncSkillMentionsWithDoc = useCallback(() => {
+    const ids = new Set(editorRef.current?.getSkillMentionIds() ?? []);
+    setSkillMentionAgents((prev) => {
+      const next = Object.fromEntries(Object.entries(prev).filter(([id]) => ids.has(id)));
+      return Object.keys(next).length === Object.keys(prev).length ? prev : next;
+    });
+  }, []);
+
   const handleSubmit = async () => {
     const content = editorRef.current?.getMarkdown()?.replace(/(\n\s*)+$/, "").trim();
     if (!content || submitting) return;
@@ -144,9 +167,11 @@ function ReplyInput({
     const suppressAgentIds = triggerPreview.agents
       .filter((agent) => suppressedAgentIds.has(agent.id))
       .map((agent) => agent.id);
-    // U2: skill→agent routing map plumbed but not yet populated (see U3);
-    // forward `undefined` so the request omits `skill_mention_agents` for now.
-    const skillMentionAgents: Record<string, string[]> | undefined = undefined;
+    // U3: forward the composer-held designation map (skill id -> agent ids).
+    // Entries are pruned as skill chips disappear from the document, so the
+    // map is already in sync with what the user sees.
+    const skillMentionAgentsPayload =
+      Object.keys(skillMentionAgents).length > 0 ? skillMentionAgents : undefined;
     // Pessimistic submit (see CommentInput): keep the text, lock + spin, clear
     // only once the server accepts it.
     setSubmitting(true);
@@ -155,13 +180,14 @@ function ReplyInput({
         content,
         activeIds.length > 0 ? activeIds : undefined,
         suppressAgentIds.length > 0 ? suppressAgentIds : undefined,
-        skillMentionAgents,
+        skillMentionAgentsPayload,
       );
       if (ok) {
         editorRef.current?.clearContent();
         setContent("");
         setIsEmpty(true);
         setSuppressedAgentIds(new Set());
+        setSkillMentionAgents({});
         setPendingAttachments([]);
         if (draftKey) clearDraft(draftKey);
       }
@@ -209,6 +235,7 @@ function ReplyInput({
                 if (md.trim().length > 0) setDraft(draftKey, md);
                 else clearDraft(draftKey);
               }
+              syncSkillMentionsWithDoc();
             }}
             onSubmit={handleSubmit}
             onUploadFile={handleUpload}
@@ -218,6 +245,11 @@ function ReplyInput({
             attachments={pendingAttachments}
             enableSlashCommands
             slashCommandMode="command"
+            skillMentionContext={{
+              wsId,
+              skillMentionAgents,
+              onSkillMentionChange: handleSkillMentionChange,
+            }}
           />
         </div>
         )}

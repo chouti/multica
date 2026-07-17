@@ -65,6 +65,7 @@ import { EditorBubbleMenu } from "./bubble-menu";
 import { posFromAnchor, type TextAnchor } from "./text-anchor";
 import { useLinkHover, LinkHoverCard } from "./link-hover-card";
 import { AttachmentDownloadProvider } from "./attachment-download-context";
+import { SkillMentionContext } from "./skill-mention-context";
 import "katex/dist/katex.min.css";
 import "./styles/index.css";
 
@@ -120,6 +121,17 @@ interface ContentEditorProps {
   onSubmit?: () => void;
   onBlur?: () => void;
   onUploadFile?: (file: File) => Promise<UploadResult | null>;
+  /**
+   * Composer-owned state for skill mention agent designation. Skill mention
+   * chips render inside Tiptap NodeViews, so they cannot read composer state
+   * directly; ContentEditor injects it through a React context for the NodeView
+   * to consume. When omitted, skill mentions stay hover-only.
+   */
+  skillMentionContext?: {
+    wsId: string;
+    skillMentionAgents: Record<string, string[]>;
+    onSkillMentionChange: (skillId: string, agentIds: string[]) => void;
+  };
   /**
    * Fired whenever this editor's "any attachment still uploading" answer
    * flips. The document IS the upload queue — every path (paste, drop, the
@@ -194,6 +206,10 @@ interface ContentEditorProps {
 
 interface ContentEditorRef {
   getMarkdown: () => string;
+  /** Skill mention ids currently present in the document. Used by composers to
+   *  keep composer-held skill designation state in sync with deletions and
+   *  other text-gesture edits. */
+  getSkillMentionIds: () => string[];
   clearContent: () => void;
   focus: () => void;
   /**
@@ -281,6 +297,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       attachments,
       flushPendingOnUnmount = false,
       onReady,
+      skillMentionContext,
     },
     ref,
   ) {
@@ -716,6 +733,17 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       // Intentionally NOT routed through `normalizeMarkdown` — this refactor
       // must preserve the exact current return value (no `trimEnd`).
       getMarkdown: () => stripBlobUrls(editor?.getMarkdown() ?? ""),
+      getSkillMentionIds: () => {
+        if (!editor) return [];
+        const ids: string[] = [];
+        editor.state.doc.descendants((node) => {
+          if (node.type.name === "mention" && node.attrs.type === "skill") {
+            ids.push(node.attrs.id as string);
+          }
+          return true;
+        });
+        return ids;
+      },
       clearContent: () => {
         editor?.commands.clearContent();
       },
@@ -791,19 +819,21 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     if (!editor) return null;
 
     return (
-      <AttachmentDownloadProvider attachments={providerAttachments}>
-        <div
-          ref={wrapperRef}
-          className="relative flex flex-1 min-h-full flex-col"
-          onMouseDown={handleContainerMouseDown}
-        >
-          <EditorContent className="flex flex-1 flex-col" editor={editor} />
-          {showBubbleMenu && (
-            <EditorBubbleMenu editor={editor} currentIssueId={currentIssueId} />
-          )}
-          <LinkHoverCard {...hover} />
-        </div>
-      </AttachmentDownloadProvider>
+      <SkillMentionContext.Provider value={skillMentionContext ?? null}>
+        <AttachmentDownloadProvider attachments={providerAttachments}>
+          <div
+            ref={wrapperRef}
+            className="relative flex flex-1 min-h-full flex-col"
+            onMouseDown={handleContainerMouseDown}
+          >
+            <EditorContent className="flex flex-1 flex-col" editor={editor} />
+            {showBubbleMenu && (
+              <EditorBubbleMenu editor={editor} currentIssueId={currentIssueId} />
+            )}
+            <LinkHoverCard {...hover} />
+          </div>
+        </AttachmentDownloadProvider>
+      </SkillMentionContext.Provider>
     );
   },
 );

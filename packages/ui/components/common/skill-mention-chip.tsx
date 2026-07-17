@@ -31,6 +31,11 @@ export interface SkillMentionChipProps {
   /** When true the chip is keyboard-focusable with a focus-visible ring
    *  (editor use). Readonly consumers leave it false (R14). */
   focusable?: boolean;
+  /** Number of agents currently designated for this skill mention. When
+   *  omitted the chip renders the plain undesignated state; when present and
+   *  > 0 it adds a small count badge so the designated state reads as an
+   *  actionable chip rather than plain text. */
+  designatedCount?: number;
 }
 
 const BASE_CLASS =
@@ -43,6 +48,7 @@ export function SkillMentionChip({
   description,
   className,
   focusable = false,
+  designatedCount,
 }: SkillMentionChipProps) {
   return (
     <span
@@ -64,6 +70,14 @@ export function SkillMentionChip({
       <span data-slot="label" className="min-w-0 shrink truncate max-w-[8rem]">
         {name}
       </span>
+      {typeof designatedCount === "number" && designatedCount > 0 && (
+        <span
+          data-testid="skill-mention-count"
+          className="inline-flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full bg-violet-200 px-1 text-[10px] font-semibold leading-none text-violet-800 dark:bg-violet-800/60 dark:text-violet-100"
+        >
+          {designatedCount}
+        </span>
+      )}
     </span>
   );
 }

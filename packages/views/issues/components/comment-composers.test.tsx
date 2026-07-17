@@ -18,6 +18,10 @@ vi.mock("@multica/core/hooks/use-file-upload", () => ({
   useFileUpload: () => ({ uploadWithToast }),
 }));
 
+vi.mock("@multica/core/hooks", () => ({
+  useWorkspaceId: () => "ws-1",
+}));
+
 vi.mock("../../common/actor-avatar", () => ({
   ActorAvatar: ({ actorType, actorId }: { actorType: string; actorId: string }) => (
     <span data-testid="actor-avatar">
@@ -76,6 +80,7 @@ vi.mock("../../editor", async () => ({
 
     useImperativeHandle(ref, () => ({
       getMarkdown: () => valueRef.current,
+      getSkillMentionIds: () => [],
       clearContent: () => {
         valueRef.current = "";
       },
@@ -117,6 +122,101 @@ vi.mock("../../editor", async () => ({
   }),
 }));
 
+// Lightweight skill-mention harness used only by the skill-mention gesture
+// tests. Kept outside the main editor mock so the existing shell/draft/upload
+// assertions stay byte-for-byte identical.
+const SkillMentionHarness = forwardRef(function SkillMentionHarness(
+  {
+    onUpdate,
+    onSubmit,
+    skillMentionContext,
+  }: {
+    onUpdate?: (markdown: string) => void;
+    onSubmit?: () => void;
+    skillMentionContext?: {
+      wsId: string;
+      skillMentionAgents: Record<string, string[]>;
+      onSkillMentionChange: (skillId: string, agentIds: string[]) => void;
+    };
+  },
+  ref: Ref<unknown>,
+) {
+  const valueRef = useRef("");
+  const skillMentionIdsRef = useRef<string[]>([]);
+
+  useImperativeHandle(ref, () => ({
+    getMarkdown: () => valueRef.current,
+    getSkillMentionIds: () => skillMentionIdsRef.current,
+    clearContent: () => {
+      valueRef.current = "";
+      skillMentionIdsRef.current = [];
+    },
+    focus: () => {},
+    focusAtCoords: () => {},
+    blur: () => {},
+    uploadFile: () => {},
+    hasActiveUploads: () => false,
+  }));
+
+  return (
+    <div>
+      <textarea
+        data-testid="editor"
+        onChange={(event) => {
+          valueRef.current = event.target.value;
+          onUpdate?.(event.target.value);
+        }}
+        onKeyDown={(event) => {
+          if ((event.metaKey || event.ctrlKey) && event.key === "Enter") onSubmit?.();
+        }}
+      />
+      {skillMentionContext && (
+        <div data-testid="skill-mention-panel">
+          <button
+            type="button"
+            data-testid="skill-mention-add"
+            onClick={() => {
+              skillMentionIdsRef.current = ["skill-1"];
+              onUpdate?.(valueRef.current);
+            }}
+          >
+            Add skill mention
+          </button>
+          <button
+            type="button"
+            data-testid="skill-mention-remove"
+            onClick={() => {
+              skillMentionIdsRef.current = [];
+              onUpdate?.(valueRef.current);
+            }}
+          >
+            Remove skill mention
+          </button>
+          <button
+            type="button"
+            data-testid="skill-mention-toggle-agent"
+            onClick={() =>
+              skillMentionContext.onSkillMentionChange(
+                "skill-1",
+                (skillMentionContext.skillMentionAgents["skill-1"] ?? []).includes(
+                  "agent-1",
+                )
+                  ? []
+                  : ["agent-1"],
+              )
+            }
+          >
+            Toggle skill agent
+          </button>
+          <span data-testid="skill-mention-count">
+            {skillMentionContext.skillMentionAgents["skill-1"]?.length ?? 0}
+          </span>
+        </div>
+      )}
+    </div>
+  );
+});
+
 function renderWithProviders(ui: ReactNode) {
   const queryClient = new QueryClient({
     defaultOptions: {
@@ -148,6 +248,17 @@ function renderReplyInput({
       avatarId="user-1"
       onSubmit={onSubmit}
       size={size}
+    />,
+  );
+  return { ...view, onSubmit };
+}
+
+function renderCommentInputWithSkillHarness(onSubmit = vi.fn().mockResolvedValue(true)) {
+  const view = renderWithProviders(
+    <CommentInput
+      issueId="issue-1"
+      onSubmit={onSubmit}
+      editorComponent={SkillMentionHarness as unknown as typeof import("../../editor").ContentEditor}
     />,
   );
   return { ...view, onSubmit };
@@ -455,5 +566,72 @@ describe("sticky composer preference", () => {
 
     activateComposer("comment-composer-shell");
     expect(screen.getByTestId("editor").parentElement?.className).not.toContain("max-h-[40vh]");
+  });
+});
+describe("comment composers — skill mentions", () => {
+  it("marks a skill chip as designated and forwards the selection on submit", async () => {
+    const onSubmit = vi.fn().mockResolvedValue(true);
+    renderCommentInputWithSkillHarness(onSubmit);
+
+    activateComposer("comment-composer-shell");
+    fireEvent.change(screen.getByTestId("editor"), { target: { value: "hello" } });
+    fireEvent.click(screen.getByTestId("skill-mention-add"));
+    fireEvent.click(screen.getByTestId("skill-mention-toggle-agent"));
+
+    expect(screen.getByTestId("skill-mention-count")).toHaveTextContent("1");
+
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() =>
+      expect(onSubmit).toHaveBeenCalledWith("hello", undefined, undefined, {
+        "skill-1": ["agent-1"],
+      }),
+    );
+
+    // A successful submit clears the designation state with the composer.
+    await waitFor(() =>
+      expect(screen.getByTestId("skill-mention-count")).toHaveTextContent("0"),
+    );
+  });
+
+  it("drops a designation when its skill mention is removed from the document", async () => {
+    const onSubmit = vi.fn().mockResolvedValue(true);
+    renderCommentInputWithSkillHarness(onSubmit);
+
+    activateComposer("comment-composer-shell");
+    fireEvent.change(screen.getByTestId("editor"), { target: { value: "hello" } });
+    fireEvent.click(screen.getByTestId("skill-mention-add"));
+    fireEvent.click(screen.getByTestId("skill-mention-toggle-agent"));
+    expect(screen.getByTestId("skill-mention-count")).toHaveTextContent("1");
+
+    // Removing the skill chip also prunes the composer-held designation entry.
+    fireEvent.click(screen.getByTestId("skill-mention-remove"));
+    await waitFor(() =>
+      expect(screen.getByTestId("skill-mention-count")).toHaveTextContent("0"),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() =>
+      expect(onSubmit).toHaveBeenCalledWith("hello", undefined, undefined, undefined),
+    );
+  });
+
+  it("keeps a cleared designation out of the submit payload", async () => {
+    const onSubmit = vi.fn().mockResolvedValue(true);
+    renderCommentInputWithSkillHarness(onSubmit);
+
+    activateComposer("comment-composer-shell");
+    fireEvent.change(screen.getByTestId("editor"), { target: { value: "hello" } });
+    fireEvent.click(screen.getByTestId("skill-mention-add"));
+    fireEvent.click(screen.getByTestId("skill-mention-toggle-agent"));
+    expect(screen.getByTestId("skill-mention-count")).toHaveTextContent("1");
+
+    // Clearing the designation reverts the chip to undesignated.
+    fireEvent.click(screen.getByTestId("skill-mention-toggle-agent"));
+    expect(screen.getByTestId("skill-mention-count")).toHaveTextContent("0");
+
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() =>
+      expect(onSubmit).toHaveBeenCalledWith("hello", undefined, undefined, undefined),
+    );
   });
 });

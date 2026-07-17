@@ -68,7 +68,9 @@
     "skill_bound_to_count": "바인딩 대상 ({{count}})",
     "skill_show_details": "항목 {{count}}개 더 보기",
     "skill_hide_details": "세부 정보 숨기기",
-    "skill_view_full": "전체 skill 보기 →"
+    "skill_view_full": "전체 skill 보기 →",
+    "skill_agents_picker_title": "이 skill을 실행할 에이전트 선택",
+    "skill_agent_row_aria": "{{name}} 전환"
   },
   "code_block": {
     "copy_code": "코드 복사",

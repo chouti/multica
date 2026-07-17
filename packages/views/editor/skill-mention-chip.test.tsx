@@ -57,4 +57,15 @@ describe("SkillMentionChip", () => {
     const chip = screen.getByLabelText("Skill: deploy-staging");
     expect(chip).toBeInTheDocument();
   });
+
+  it("renders a designated count badge", () => {
+    render(<SkillMentionChip name="deploy-staging" designatedCount={2} />);
+    const badge = screen.getByTestId("skill-mention-count");
+    expect(badge).toHaveTextContent("2");
+  });
+
+  it("hides the designated count badge when undesignated", () => {
+    render(<SkillMentionChip name="deploy-staging" designatedCount={0} />);
+    expect(screen.queryByTestId("skill-mention-count")).not.toBeInTheDocument();
+  });
 });

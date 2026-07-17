@@ -17,6 +17,7 @@
  * wrapper is the outermost inline element.
  */
 
+import { useState } from "react";
 import { NodeViewWrapper } from "@tiptap/react";
 import type { NodeViewProps } from "@tiptap/react";
 import { useWorkspacePaths } from "@multica/core/paths";
@@ -27,7 +28,14 @@ import { IssueChip } from "../../issues/components/issue-chip";
 import { ProjectChip } from "../../projects/components/project-chip";
 import { ActorMentionChip } from "@multica/ui/components/common/actor-mention-chip";
 import { SkillMentionChip } from "@multica/ui/components/common/skill-mention-chip";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@multica/ui/components/ui/popover";
 import { MentionHoverCard } from "../mention-hover-card";
+import { SkillAgentPicker } from "../skill-agent-picker";
+import { useSkillMentionContext } from "../skill-mention-context";
 
 export function MentionView({ node }: NodeViewProps) {
   const { type, id, label } = node.attrs;
@@ -55,13 +63,13 @@ export function MentionView({ node }: NodeViewProps) {
 
   const name = (label ?? id) as string;
 
-  // Skill mentions render as a skill chip with bound-agents hover card.
+  // Skill mentions render as a skill chip with bound-agents hover card. When
+  // composer state is available (comment composers), clicking the chip also
+  // opens the agent picker so the mention can be designated to specific agents.
   if (type === "skill") {
     return (
       <NodeViewWrapper as="span" className="inline">
-        <MentionHoverCard type="skill" id={id}>
-          <SkillMentionChip name={name} focusable />
-        </MentionHoverCard>
+        <SkillMention skillId={id} name={name} />
       </NodeViewWrapper>
     );
   }
@@ -84,6 +92,58 @@ export function MentionView({ node }: NodeViewProps) {
     <NodeViewWrapper as="span" className="inline">
       <span className="mention">@{name}</span>
     </NodeViewWrapper>
+  );
+}
+
+function SkillMention({ skillId, name }: { skillId: string; name: string }) {
+  const context = useSkillMentionContext();
+  const [open, setOpen] = useState(false);
+  const selectedAgentIds = context?.skillMentionAgents[skillId] ?? [];
+
+  const chip = (
+    <SkillMentionChip
+      name={name}
+      focusable
+      designatedCount={selectedAgentIds.length}
+    />
+  );
+
+  if (!context) {
+    return (
+      <MentionHoverCard type="skill" id={skillId}>
+        {chip}
+      </MentionHoverCard>
+    );
+  }
+
+  // The picker must still open on click while the hover card keeps its own
+  // hover-only preview. PopoverTrigger is the click target; the HoverCard wrapper
+  // stays outside so hover behavior remains unchanged.
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <MentionHoverCard type="skill" id={skillId}>
+        <PopoverTrigger
+          render={(triggerProps) => (
+            <span
+              {...triggerProps}
+              className="inline-flex cursor-pointer"
+              data-testid={`skill-mention-trigger-${skillId}`}
+            />
+          )}
+        >
+          {chip}
+        </PopoverTrigger>
+      </MentionHoverCard>
+      <PopoverContent align="start" className="w-72">
+        <SkillAgentPicker
+          skillId={skillId}
+          fallbackSkillName={name}
+          wsId={context.wsId}
+          selectedAgentIds={selectedAgentIds}
+          onChange={(agentIds) => context.onSkillMentionChange(skillId, agentIds)}
+        />
+      </PopoverContent>
+    </Popover>
   );
 }
 

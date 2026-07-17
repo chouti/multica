@@ -9,6 +9,7 @@ import type { Attachment } from "@multica/core/types";
 import { contentReferencesAttachment } from "@multica/core/types";
 import { formatShortcut, useShortcut } from "@multica/core/shortcuts";
 import { useCommentComposerStore, useCommentDraftStore } from "@multica/core/issues/stores";
+import { useWorkspaceId } from "@multica/core/hooks";
 import { useT } from "../../i18n";
 import { CommentTriggerChips } from "./comment-trigger-chips";
 import { useCommentTriggerPreview } from "../hooks/use-comment-trigger-preview";
@@ -19,11 +20,16 @@ interface CommentInputProps {
    *  (editor locked + button spinning) until this settles, then clears only on
    *  success — a failed send must not silently discard the user's draft. */
   onSubmit: (content: string, attachmentIds?: string[], suppressAgentIds?: string[], skillMentionAgents?: Record<string, string[]>) => Promise<boolean>;
+  /** Test-only override for the editor implementation. Production callers
+   *  always use ContentEditor; tests can inject a lightweight harness to
+   *  exercise skill-mention state plumbing without booting Tiptap. */
+  editorComponent?: typeof ContentEditor;
 }
 
-function CommentInput({ issueId, onSubmit }: CommentInputProps) {
+function CommentInput({ issueId, onSubmit, editorComponent: EditorComponent = ContentEditor }: CommentInputProps) {
   const { t } = useT("issues");
   const { t: tEditor } = useT("editor");
+  const wsId = useWorkspaceId();
   const sendShortcut = useShortcut("send");
   const editorRef = useRef<ContentEditorRef>(null);
   // Sending mid-upload would strip the pending image's blob URL out of the
@@ -39,6 +45,7 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
   const [isEmpty, setIsEmpty] = useState(() => !initialDraft?.trim());
   const [submitting, setSubmitting] = useState(false);
   const [suppressedAgentIds, setSuppressedAgentIds] = useState<Set<string>>(() => new Set());
+  const [skillMentionAgents, setSkillMentionAgents] = useState<Record<string, string[]>>({});
   const triggerPreview = useCommentTriggerPreview({ issueId, content });
   // Attachments uploaded in this composer session. Drives both:
   //  - submit-time `attachment_ids` payload (filtered to URLs still in markdown)
@@ -91,6 +98,7 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
 
   useEffect(() => {
     setSuppressedAgentIds(new Set());
+    setSkillMentionAgents({});
   }, [issueId]);
 
   useEffect(() => {
@@ -107,6 +115,25 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
       if (next.has(agentId)) next.delete(agentId);
       else next.add(agentId);
       return next;
+    });
+  }, []);
+
+  const handleSkillMentionChange = useCallback((skillId: string, agentIds: string[]) => {
+    setSkillMentionAgents((prev) => {
+      const next = { ...prev };
+      if (agentIds.length > 0) next[skillId] = agentIds;
+      else delete next[skillId];
+      return next;
+    });
+  }, []);
+
+  // Text-gesture consistency: when a skill mention disappears from the editor
+  // document, drop its designation state too.
+  const syncSkillMentionsWithDoc = useCallback(() => {
+    const ids = new Set(editorRef.current?.getSkillMentionIds() ?? []);
+    setSkillMentionAgents((prev) => {
+      const next = Object.fromEntries(Object.entries(prev).filter(([id]) => ids.has(id)));
+      return Object.keys(next).length === Object.keys(prev).length ? prev : next;
     });
   }, []);
 
@@ -127,10 +154,11 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
     const suppressAgentIds = triggerPreview.agents
       .filter((agent) => suppressedAgentIds.has(agent.id))
       .map((agent) => agent.id);
-    // U2: the skill→agent routing map is plumbed through the submit path but
-    // not yet populated from the skill-chip gesture (that's U3). Forward
-    // `undefined` so the request omits `skill_mention_agents` for now.
-    const skillMentionAgents: Record<string, string[]> | undefined = undefined;
+    // U3: forward the composer-held designation map (skill id -> agent ids).
+    // Entries are pruned as skill chips disappear from the document, so the
+    // map is already in sync with what the user sees.
+    const skillMentionAgentsPayload =
+      Object.keys(skillMentionAgents).length > 0 ? skillMentionAgents : undefined;
     // Pessimistic submit: keep the text in place (the editor is locked and the
     // button spins via `submitting`) until the server actually accepts it, then
     // clear. Clearing only on success means a slow send no longer looks like
@@ -142,13 +170,14 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
         content,
         activeIds.length > 0 ? activeIds : undefined,
         suppressAgentIds.length > 0 ? suppressAgentIds : undefined,
-        skillMentionAgents,
+        skillMentionAgentsPayload,
       );
       if (ok) {
         editorRef.current?.clearContent();
         setContent("");
         setIsEmpty(true);
         setSuppressedAgentIds(new Set());
+        setSkillMentionAgents({});
         setPendingAttachments([]);
         clearDraft(draftKey);
       }
@@ -179,7 +208,7 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
         )}
         aria-busy={submitting || undefined}
       >
-        <ContentEditor
+        <EditorComponent
           ref={editorRef}
           defaultValue={initialDraft}
           onReady={lazy.onReady}
@@ -191,6 +220,7 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
             // reload or scroll-out-of-viewport restores work to the keystroke.
             if (md.trim().length > 0) setDraft(draftKey, md);
             else clearDraft(draftKey);
+            syncSkillMentionsWithDoc();
           }}
           onSubmit={handleSubmit}
           onUploadFile={handleUpload}
@@ -200,6 +230,11 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
           attachments={pendingAttachments}
           enableSlashCommands
           slashCommandMode="command"
+          skillMentionContext={{
+            wsId,
+            skillMentionAgents,
+            onSkillMentionChange: handleSkillMentionChange,
+          }}
         />
       </div>
       )}
