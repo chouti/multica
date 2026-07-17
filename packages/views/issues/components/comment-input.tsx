@@ -41,12 +41,18 @@ function CommentInput({ issueId, onSubmit, editorComponent: EditorComponent = Co
   // initial content and the submit-button enable state — without this the
   // button would be disabled even though the editor visibly contains text.
   const draftKey = `new:${issueId}` as const;
-  const initialDraft = useCommentDraftStore.getState().getDraft(draftKey);
+  const initialDraftPayload = useCommentDraftStore.getState().getDraftPayload(draftKey);
+  const initialDraft = initialDraftPayload?.content;
   const [content, setContent] = useState(initialDraft ?? "");
   const [isEmpty, setIsEmpty] = useState(() => !initialDraft?.trim());
   const [submitting, setSubmitting] = useState(false);
   const [suppressedAgentIds, setSuppressedAgentIds] = useState<Set<string>>(() => new Set());
-  const [skillMentionAgents, setSkillMentionAgents] = useState<Record<string, string[]>>({});
+  // Restore the persisted skill-mention designation map alongside the
+  // content so a reloaded draft rehydrates the user's chip-by-chip
+  // designations (review finding #7).
+  const [skillMentionAgents, setSkillMentionAgents] = useState<Record<string, string[]>>(
+    initialDraftPayload?.skillMentionAgents ?? {},
+  );
   // Composer-owned popover-open state, keyed by skill id. Hoisted from
   // the per-NodeView useState so a Tiptap NodeView recreation does not
   // close the picker mid-selection (review finding #14).
@@ -90,7 +96,12 @@ function CommentInput({ issueId, onSubmit, editorComponent: EditorComponent = Co
   useEffect(() => {
     const flush = () => {
       const md = editorRef.current?.getMarkdown();
-      if (md && md.trim().length > 0) setDraft(draftKey, md);
+      if (md && md.trim().length > 0) {
+        // Persist content + the skill-mention designation map together so
+        // a restored draft rehydrates both (review finding #7). The
+        // designation map is only stored when there is something to store.
+        setDraft(draftKey, { content: md, skillMentionAgents });
+      }
     };
     const onVis = () => { if (document.visibilityState === "hidden") flush(); };
     document.addEventListener("visibilitychange", onVis);
@@ -231,8 +242,11 @@ function CommentInput({ issueId, onSubmit, editorComponent: EditorComponent = Co
             setIsEmpty(!md.trim());
             // Debounced upstream (debounceMs=100). Persist on every tick so a
             // reload or scroll-out-of-viewport restores work to the keystroke.
-            if (md.trim().length > 0) setDraft(draftKey, md);
-            else clearDraft(draftKey);
+            if (md.trim().length > 0) {
+              setDraft(draftKey, { content: md, skillMentionAgents });
+            } else {
+              clearDraft(draftKey);
+            }
             syncSkillMentionsWithDoc();
           }}
           onSubmit={handleSubmit}

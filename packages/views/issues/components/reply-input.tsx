@@ -61,16 +61,22 @@ function ReplyInput({
   const uploadGate = useUploadGate(editorRef);
   // If a draft key is provided, hydrate from store on mount (defaultValue is
   // the only injection point on ContentEditorRef) and flush on every onUpdate.
-  const initialDraft = draftKey
-    ? useCommentDraftStore.getState().getDraft(draftKey)
+  const initialDraftPayload = draftKey
+    ? useCommentDraftStore.getState().getDraftPayload(draftKey)
     : undefined;
+  const initialDraft = initialDraftPayload?.content;
   const [content, setContent] = useState(initialDraft ?? "");
   const setDraft = useCommentDraftStore((s) => s.setDraft);
   const clearDraft = useCommentDraftStore((s) => s.clearDraft);
   const [isEmpty, setIsEmpty] = useState(!initialDraft?.trim());
   const [submitting, setSubmitting] = useState(false);
   const [suppressedAgentIds, setSuppressedAgentIds] = useState<Set<string>>(() => new Set());
-  const [skillMentionAgents, setSkillMentionAgents] = useState<Record<string, string[]>>({});
+  // Restore the persisted skill-mention designation map alongside the
+  // content so a reloaded draft rehydrates the user's chip-by-chip
+  // designations (review finding #7).
+  const [skillMentionAgents, setSkillMentionAgents] = useState<Record<string, string[]>>(
+    initialDraftPayload?.skillMentionAgents ?? {},
+  );
   // Composer-owned popover-open state, keyed by skill id (see comment-input).
   const [openPopoverFor, setOpenPopoverFor] = useState<string | null>(null);
   // Skill-designated agents surfaced as preview chips (see comment-input).
@@ -103,7 +109,11 @@ function ReplyInput({
     if (!draftKey) return;
     const flush = () => {
       const md = editorRef.current?.getMarkdown();
-      if (md && md.trim().length > 0) setDraft(draftKey, md);
+      if (md && md.trim().length > 0) {
+        // Persist content + skill-mention designations together so a
+        // restored draft rehydrates both (review finding #7).
+        setDraft(draftKey, { content: md, skillMentionAgents });
+      }
     };
     const onVis = () => { if (document.visibilityState === "hidden") flush(); };
     document.addEventListener("visibilitychange", onVis);
@@ -242,8 +252,11 @@ function ReplyInput({
               setContent(md);
               setIsEmpty(!md.trim());
               if (draftKey) {
-                if (md.trim().length > 0) setDraft(draftKey, md);
-                else clearDraft(draftKey);
+                if (md.trim().length > 0) {
+                  setDraft(draftKey, { content: md, skillMentionAgents });
+                } else {
+                  clearDraft(draftKey);
+                }
               }
               syncSkillMentionsWithDoc();
             }}

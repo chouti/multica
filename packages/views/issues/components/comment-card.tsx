@@ -673,7 +673,9 @@ function CommentRow({
               placeholder={t(($) => $.comment.edit_placeholder)}
               onUpdate={(md) => {
                 edit.setContent(md);
-                if (md.trim().length > 0) edit.setDraft(edit.draftKey, md);
+                if (md.trim().length > 0) {
+                  edit.setDraft(edit.draftKey, { content: md });
+                }
                 else edit.clearDraft(edit.draftKey);
               }}
               onSubmit={edit.saveEdit}
@@ -1016,8 +1018,11 @@ function CommentCardImpl({
                     placeholder={t(($) => $.comment.edit_placeholder)}
                     onUpdate={(md) => {
                       edit.setContent(md);
-                      if (md.trim().length > 0) edit.setDraft(edit.draftKey, md);
-                      else edit.clearDraft(edit.draftKey);
+                      if (md.trim().length > 0) {
+                        edit.setDraft(edit.draftKey, { content: md });
+                      } else {
+                        edit.clearDraft(edit.draftKey);
+                      }
                     }}
                     onSubmit={edit.saveEdit}
                     onUploadFile={edit.handleUpload}

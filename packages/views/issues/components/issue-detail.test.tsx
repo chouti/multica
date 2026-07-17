@@ -320,6 +320,7 @@ vi.mock("@multica/core/issues/stores", async () => ({
       const state = {
         drafts: {} as Record<string, { content: string; updatedAt: number }>,
         getDraft: () => undefined,
+        getDraftPayload: () => undefined,
         setDraft: () => {},
         clearDraft: () => {},
       };
@@ -329,6 +330,7 @@ vi.mock("@multica/core/issues/stores", async () => ({
       getState: () => ({
         drafts: {} as Record<string, { content: string; updatedAt: number }>,
         getDraft: () => undefined,
+        getDraftPayload: () => undefined,
         setDraft: () => {},
         clearDraft: () => {},
       }),

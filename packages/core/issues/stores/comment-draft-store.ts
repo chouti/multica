@@ -22,13 +22,30 @@ export type CommentDraftKey =
 
 interface CommentDraft {
   content: string;
+  /**
+   * Composer-held skill→agent-id map for skill mentions with explicit
+   * agent designations. Persisted so a reload restores the user's
+   * chip-by-chip designations — review finding #7.
+   */
+  skillMentionAgents?: Record<string, string[]>;
   updatedAt: number;
+}
+
+export interface CommentDraftPayload {
+  content: string;
+  skillMentionAgents?: Record<string, string[]>;
 }
 
 interface CommentDraftStore {
   drafts: Record<string, CommentDraft>;
   getDraft: (key: CommentDraftKey) => string | undefined;
-  setDraft: (key: CommentDraftKey, content: string) => void;
+  /**
+   * Read the persisted draft content AND the skill-mention designations.
+   * Both are returned together so a restored draft hydrates the
+   * composer state as a unit (review finding #7).
+   */
+  getDraftPayload: (key: CommentDraftKey) => CommentDraftPayload | undefined;
+  setDraft: (key: CommentDraftKey, payload: CommentDraftPayload) => void;
   clearDraft: (key: CommentDraftKey) => void;
 }
 
@@ -53,10 +70,28 @@ export const useCommentDraftStore = create<CommentDraftStore>()(
     (set, get) => ({
       drafts: {},
       getDraft: (key) => get().drafts[key]?.content,
-      setDraft: (key, content) =>
-        set((s) => ({
-          drafts: { ...s.drafts, [key]: { content, updatedAt: Date.now() } },
-        })),
+      getDraftPayload: (key) => {
+        const d = get().drafts[key];
+        if (!d) return undefined;
+        return {
+          content: d.content,
+          skillMentionAgents: d.skillMentionAgents,
+        };
+      },
+      setDraft: (key, payload) =>
+        set((s) => {
+          const next: CommentDraft = {
+            content: payload.content,
+            updatedAt: Date.now(),
+          };
+          // Only persist skillMentionAgents when there is something to
+          // rehydrate — keeps the on-disk schema clean for the no-designation
+          // common case and avoids noise in test diffs.
+          if (payload.skillMentionAgents && Object.keys(payload.skillMentionAgents).length > 0) {
+            next.skillMentionAgents = payload.skillMentionAgents;
+          }
+          return { drafts: { ...s.drafts, [key]: next } };
+        }),
       clearDraft: (key) =>
         set((s) => {
           if (!(key in s.drafts)) return s;
