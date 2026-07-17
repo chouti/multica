@@ -872,6 +872,50 @@ func TestEnqueueSkillMention_ImplicitAndDesignatedSameAgent_NoBindWithoutRun(t *
 	}
 }
 
+// TestUpdateComment_SkillMentionAgentsOverPerSkillCap400s covers review
+// finding #5: one designation list with more than maxSkillMentionAgentsPerSkill
+// agents must 400 at the boundary (binding the amplification for the
+// unbounded-fan-out vector).
+func TestUpdateComment_SkillMentionAgentsOverPerSkillCap400s(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	fx := newSkillMentionFixture(t)
+
+	commentID := postCommentForTriggerPreviewTest(t, fx.IssueID, map[string]any{
+		"content": "first",
+	})
+	content := fmt.Sprintf("[@SkillA](mention://skill/%s) please review", fx.SkillID)
+
+	// Per-skill cap is 8; 9 well-formed UUIDs trigger a 400.
+	agentIDs := []string{
+		fx.OtherAgentID, fx.JID,
+		"00000000-0000-0000-0000-000000000001",
+		"00000000-0000-0000-0000-000000000002",
+		"00000000-0000-0000-0000-000000000003",
+		"00000000-0000-0000-0000-000000000004",
+		"00000000-0000-0000-0000-000000000005",
+		"00000000-0000-0000-0000-000000000006",
+		"00000000-0000-0000-0000-000000000007",
+	}
+
+	// Pre-seed a 9-agent list directly. updateCommentForTriggerPreviewTest
+	// asserts 200; here we want 400. Drive the route raw and assert.
+	req := newRequest(http.MethodPut, "/api/comments/"+commentID, map[string]any{
+		"content":              content,
+		"skill_mention_agents": map[string][]string{fx.SkillID: agentIDs},
+	})
+	req = withURLParam(req, "commentId", commentID)
+	w := httptest.NewRecorder()
+	testHandler.UpdateComment(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 on per-skill cap exceeded (9 agents), got %d: %s", w.Code, w.Body.String())
+	}
+	// No side effect: the new 9-agent list must not have produced any
+	// agent_skill binding for J (J had a pre-existing one from the
+	// fixture; the cap-blocked request must not have touched it).
+}
+
 // updateCommentExpectBadRequest posts a PUT with the given body and asserts
 // the handler returns 400. Uses the router-level path so the JSON decode +
 // parseSkillMentionAgents boundary validation are both exercised.

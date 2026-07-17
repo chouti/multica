@@ -451,12 +451,33 @@ func parseUUIDSliceOrBadRequest(w http.ResponseWriter, ids []string, fieldName s
 // designation (absent key or empty list) is a silent no-op. Invalid agent UUIDs
 // in the map abort with a 400 so a single malformed entry doesn't slip through
 // and trigger the wrong agent.
+//
+// Bounds: the per-skill agent list is capped at maxSkillMentionAgentsPerSkill
+// and the total map size is capped at maxSkillMentionAgentsMapSize, to bound
+// the per-comment amplification (a single comment otherwise triggers N binds
+// + N enqueues + N event-bus broadcasts for unbounded N — review finding #5).
+// Both caps are enforced at the boundary with a 400 so a client that intends
+// a runaway request sees the contract immediately rather than silently
+// truncating.
+const (
+	maxSkillMentionAgentsPerSkill = 8
+	maxSkillMentionAgentsMapSize  = 16
+)
+
 func parseSkillMentionAgents(w http.ResponseWriter, in map[string][]string, fieldName string) (map[string][]pgtype.UUID, bool) {
 	if len(in) == 0 {
 		return nil, true
 	}
+	if len(in) > maxSkillMentionAgentsMapSize {
+		writeError(w, http.StatusBadRequest, fieldName+" exceeds max number of skill entries ("+strconv.Itoa(maxSkillMentionAgentsMapSize)+")")
+		return nil, false
+	}
 	out := make(map[string][]pgtype.UUID, len(in))
 	for skillID, agentIDs := range in {
+		if len(agentIDs) > maxSkillMentionAgentsPerSkill {
+			writeError(w, http.StatusBadRequest, fieldName+" exceeds max agents per skill ("+strconv.Itoa(maxSkillMentionAgentsPerSkill)+")")
+			return nil, false
+		}
 		uuids := make([]pgtype.UUID, 0, len(agentIDs))
 		for _, agentID := range agentIDs {
 			u, err := util.ParseUUID(agentID)
