@@ -69,7 +69,7 @@
     "skill_show_details": "展开 {{count}} 项",
     "skill_hide_details": "收起",
     "skill_view_full": "查看完整 skill →",
-    "skill_agents_picker_title": "选择要运行该技能的 Agent",
+    "skill_agents_picker_title": "选择要运行该 skill 的 Agent",
     "skill_agent_row_aria": "切换 {{name}}"
   },
   "slash_command": {
