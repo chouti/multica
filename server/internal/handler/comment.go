@@ -13,7 +13,6 @@ import (
 	"unicode"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/service"
@@ -1713,6 +1712,12 @@ type skillBindingsMap = map[string][]pgtype.UUID
 // remaining agents unbound-and-enqueued. The user-facing outcome remains
 // "queued" for the agent (the run starts); the bind is a durable
 // side-effect for future runs and the next comment retries it.
+//
+// Uses a single SQL upsert (UpsertAgentSkillEnabled, INSERT ... ON CONFLICT
+// DO UPDATE SET enabled=TRUE) so the prior TOCTOU window (reliability
+// re-review finding) where GetAgentSkillEnabled + AddAgentSkill were two
+// separate statements is closed. The upsert converges on enabled=TRUE
+// regardless of prior state, regardless of concurrent writers.
 func (h *Handler) bindDesignatedSkillsForTriggers(ctx context.Context, triggers []commentAgentTrigger, skillBindings skillBindingsMap, issue db.Issue) {
 	for _, t := range triggers {
 		if t.Source != commentTriggerSourceMentionSkill {
@@ -1724,66 +1729,19 @@ func (h *Handler) bindDesignatedSkillsForTriggers(ctx context.Context, triggers 
 			continue
 		}
 		for _, skillUUID := range skills {
-			enabled, exists, err := h.lookupAgentSkillEnabled(ctx, t.Agent.ID, skillUUID)
-			if err != nil {
-				slog.Warn("skill mention bind: lookup failed (continuing)",
+			if _, err := h.Queries.UpsertAgentSkillEnabled(ctx, db.UpsertAgentSkillEnabledParams{
+				AgentID: t.Agent.ID,
+				SkillID: skillUUID,
+			}); err != nil {
+				slog.Warn("skill mention bind: upsert failed (continuing)",
 					"issue_id", uuidToString(issue.ID),
 					"agent_id", agentKey,
 					"skill_id", uuidToString(skillUUID),
 					"error", err)
 				continue
 			}
-			if exists && enabled {
-				continue
-			}
-			if !exists {
-				if err := h.Queries.AddAgentSkill(ctx, db.AddAgentSkillParams{AgentID: t.Agent.ID, SkillID: skillUUID}); err != nil {
-					slog.Warn("skill mention bind: insert failed (continuing)",
-						"issue_id", uuidToString(issue.ID),
-						"agent_id", agentKey,
-						"skill_id", uuidToString(skillUUID),
-						"error", err)
-					continue
-				}
-			} else {
-				// exists && !enabled: re-enable the row so the skill bundle
-				// loads (review finding #2).
-				enabled := true
-				if _, err := h.Queries.SetAgentSkillEnabled(ctx, db.SetAgentSkillEnabledParams{
-					AgentID: t.Agent.ID,
-					SkillID: skillUUID,
-					Enabled: enabled,
-				}); err != nil {
-					slog.Warn("skill mention bind: re-enable failed (continuing)",
-						"issue_id", uuidToString(issue.ID),
-						"agent_id", agentKey,
-						"skill_id", uuidToString(skillUUID),
-						"error", err)
-					continue
-				}
-			}
 		}
 	}
-}
-
-// lookupAgentSkillEnabled returns (enabled, exists, err) for the given
-// (agent, skill) pair. Distinguishes a disabled-but-existing row from a
-// missing row so the bind pass can take the correct upsert path (review
-// finding #2). Uses the targeted GetAgentSkillEnabled query so the
-// "no row" and "row present but disabled" cases are distinguishable.
-func (h *Handler) lookupAgentSkillEnabled(ctx context.Context, agentID, skillID pgtype.UUID) (enabled bool, exists bool, err error) {
-	enabled, err = h.Queries.GetAgentSkillEnabled(ctx, db.GetAgentSkillEnabledParams{
-		AgentID: agentID,
-		SkillID: skillID,
-	})
-	if err != nil {
-		// sqlc returns pgx.ErrNoRows for a missing row; treat that as exists=false.
-		if errors.Is(err, pgx.ErrNoRows) {
-			return false, false, nil
-		}
-		return false, false, err
-	}
-	return enabled, true, nil
 }
 
 func filterSuppressedCommentAgentTriggers(triggers []commentAgentTrigger, suppressAgentIDs []pgtype.UUID) []commentAgentTrigger {

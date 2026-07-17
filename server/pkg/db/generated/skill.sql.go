@@ -121,26 +121,29 @@ func (q *Queries) GetSkill(ctx context.Context, id pgtype.UUID) (Skill, error) {
 	return i, err
 }
 
-const getAgentSkillEnabled = `-- name: GetAgentSkillEnabled :one
-SELECT enabled FROM agent_skill WHERE agent_id = $1 AND skill_id = $2
+const getAgentSkillEnabled = `-- name: UpsertAgentSkillEnabled :execrows
+INSERT INTO agent_skill (agent_id, skill_id, enabled)
+VALUES ($1, $2, TRUE)
+ON CONFLICT (agent_id, skill_id) DO UPDATE SET enabled = TRUE
 `
 
-type GetAgentSkillEnabledParams struct {
+type UpsertAgentSkillEnabledParams struct {
 	AgentID pgtype.UUID `json:"agent_id"`
 	SkillID pgtype.UUID `json:"skill_id"`
 }
 
-// GetAgentSkillEnabled returns the enabled flag of the (agent_id, skill_id)
-// row. Returns pgx.ErrNoRows when the row does not exist. Used by
-// bindDesignatedSkillsForTriggers in the @skill redesign so the bind
-// pass can distinguish "row missing" (AddAgentSkill) from "row present
-// but disabled" (SetAgentSkillEnabled true) — restoring the R3 contract
-// that a designated agent actually receives the skill bundle.
-func (q *Queries) GetAgentSkillEnabled(ctx context.Context, arg GetAgentSkillEnabledParams) (bool, error) {
-	row := q.db.QueryRow(ctx, getAgentSkillEnabled, arg.AgentID, arg.SkillID)
-	var enabled bool
-	err := row.Scan(&enabled)
-	return enabled, err
+// UpsertAgentSkillEnabled upserts an enabled agent_skill row, converging
+// on enabled=TRUE regardless of prior state. Closes the TOCTOU window
+// that the previous GetAgentSkillEnabled + AddAgentSkill split had.
+// Replaces the prior `if exists && enabled { continue } / if exists
+// else insert / else update` branching — that branching is no longer
+// needed because the upsert handles all three cases atomically.
+func (q *Queries) UpsertAgentSkillEnabled(ctx context.Context, arg UpsertAgentSkillEnabledParams) (int64, error) {
+	result, err := q.db.Exec(ctx, getAgentSkillEnabled, arg.AgentID, arg.SkillID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const getSkillByWorkspaceAndName = `-- name: GetSkillByWorkspaceAndName :one
