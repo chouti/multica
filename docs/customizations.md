@@ -1,7 +1,7 @@
 ---
 title: "Local customization ledger — tracking divergent commits and upstream PR status"
 date: 2026-07-17
-last_updated: 2026-07-17
+last_updated: 2026-07-21
 category: "workflow-issues"
 module: "git"
 problem_type: "workflow_issue"
@@ -17,6 +17,8 @@ tags: [local-customizations, upstream-pr, ledger, merge-strategy, self-hosted, d
 # Local customization ledger
 
 > **This is a living document.** Update it whenever you open/close an upstream PR, land a new local customization, or complete an upstream merge. It is the per-customization companion to the merge workflow in `docs/solutions/workflow-issues/safe-upstream-upgrade-with-local-customizations.md` (which covers the *mechanics* of one upgrade; this file tracks *what* you are carrying across all upgrades).
+
+*Audit 2026-07-21:* all tracked PR states unchanged since 2026-07-17 (no new merges/closes); @skill-mention redesign marked **EXECUTED**; registered one new pure-local build-fix (`truncateFallbackCommentBody`, GH #5455).
 
 ## Why this ledger exists
 
@@ -44,10 +46,10 @@ Two open PRs both modify the core mention render path (`packages/views/editor/ex
 
 | Feature | PR | Status | Key upstream files | Action on next merge |
 | --- | --- | --- | --- | --- |
-| MentionType registry + skill mention | [#5346](https://github.com/multica-ai/multica/pull/5346) | OPEN (no review, 3 comments) | `editor/extensions/mention-suggestion.tsx`, `editor/extensions/mention-view.tsx`, `handler/skill_mention_trigger*.go`, `handler/comment.go`, `handler/handler.go`, `issues/components/comment-trigger-chips.tsx`, `builtin_skills/multica-mentioning/*` | Carry; watch for upstream mention refactors. See the @skill gesture design note below. |
+| MentionType registry + skill mention | [#5346](https://github.com/multica-ai/multica/pull/5346) | OPEN (no review, 3 comments; PR last updated 2026-07-14) | `editor/extensions/mention-suggestion.tsx`, `editor/extensions/mention-view.tsx`, `handler/skill_mention_trigger*.go`, `handler/comment.go`, `handler/handler.go`, `issues/components/comment-trigger-chips.tsx`, `builtin_skills/multica-mentioning/*` | Carry; watch for upstream mention refactors. **Local now leads this PR** — the 7-17 composer-gesture redesign (below) is NOT in the PR. See the @skill gesture note below. |
 | Actor mention avatar chips | [#5199](https://github.com/multica-ai/multica/pull/5199) | OPEN (no review) | `editor/extensions/mention-view.tsx`, `editor/mention-hover-card.tsx`, `readonly-content.tsx`, `ui/ActorMentionChip` | Carry; same hot file as #5346 — resolve together. |
 
-> **@skill mention — routing redesign (planned 2026-07-17).** Plan: `docs/plans/2026-07-17-001-feat-skill-mention-agent-gesture-plan.md`. Replaces the binding-table reverse-lookup (`resolveSkillMentionTrigger` candidates + R13) with an **explicit composer gesture**: a `@skill` chip carries a "pick an agent" popover; on submit the backend durably binds the skill to the designated agent (`AddAgentSkill`, idempotent) and enqueues it, so references/scripts ride the normal bound-skill pipeline. Design choices that *reduce* future merge surface: gesture selection lives in composer React state (no `util/mention.go` or mention-node-spec change); `skill_mention_agents` (currently a backend-only reserved hook, `handler/comment.go:1004`) becomes the sole skill-routing input, widened to `skill_id → [agent_id]`. Hot files gained by this work: `handler/comment.go` (bind-and-trigger + reverse-lookup deletion), `handler/handler.go` (`parseSkillMentionAgents` type), frontend mention cluster + `comment-trigger-chips.tsx` + `use-issue-timeline.ts` + `core/api/client.ts`. No DB migration. When upstream merges #5346, re-apply only the gesture + bind-on-submit logic on top of upstream's mention render path.
+> **@skill mention — composer-gesture redesign (EXECUTED 2026-07-17).** Plan: `docs/plans/2026-07-17-001-feat-skill-mention-agent-gesture-plan.md`. The binding-table reverse-lookup was replaced by an **explicit composer gesture**: a `@skill` chip carries a "pick an agent" popover (`packages/views/editor/skill-agent-picker.tsx`, feat `e62cbb40f` U3); on submit the backend durably binds the skill to the designated agent (`AddAgentSkill`, idempotent single-SQL upsert — TOCTOU-closed `fd759a62a`) and enqueues it, so references/scripts ride the normal bound-skill pipeline. `skill_mention_agents` is now the sole skill-routing input, widened to `skill_id → [agent_id]` and capped per-skill + total at the request boundary (`db1fcbf27`). Bind-on-submit is symmetric across CreateComment and UpdateComment edit paths (`a8a799f9e`), draft-persisted across reloads (`65a1ad4d2`), and surfaced in the trigger-preview strip (`3cee62fd2`); `@skill` contract documented in `builtin_skills/multica-mentioning/SKILL.md` (feat `c4ed11891` U4). **No schema migration** — only `server/pkg/db/queries/skill.sql` (sqlc) + generated `skill.sql.go` changed. **Verified hot-file surface (wider than the original plan predicted):** `handler/comment.go`, `handler/handler.go`, `editor/extensions/mention-view.tsx`, `editor/content-editor.tsx`, `issues/components/comment-{input,card,trigger-chips}.tsx`, `reply-input.tsx`, `core/issues/stores/comment-draft-store.ts`, plus new files `editor/skill-agent-picker.tsx`, `editor/skill-mention-context.ts`, `ui/components/common/skill-mention-chip.tsx`, `issues/hooks/use-skill-designated-preview-agents.ts`, `core/issues/comment-trigger-outcomes.ts`. (Plan had listed `use-issue-timeline.ts` + `core/api/client.ts`; neither was touched.) When upstream merges #5346, re-apply only the gesture + bind-on-submit logic on top of upstream's mention render path.
 
 ### Open PRs — feature additions
 
@@ -89,6 +91,7 @@ These PRs were closed **by the author** and their code was never merged into loc
 | Issue prefix fallback to slug for non-latin workspace names | — | LOCAL | workspace/prefix logic | Own; small, low conflict. |
 | i18n three-dot ellipsis in backend loading copy | — | LOCAL | backend loading copy | Own; trivial. |
 | SkillProfileCard compact redesign + frontmatter | — | LOCAL | skills UI components | Own; overlaps #5160 area — resolve together. |
+| `truncateFallbackCommentBody` build-fix (fills symbol left dangling by upstream merge `24ea38dcb`; GH [#5455](https://github.com/multica-ai/multica/issues/5455), closed upstream 2026-07-16) | — | LOCAL | own new file `server/internal/service/fallback_comment_truncate.go` (24 lines, zero conflict) | Own; **duplicate-symbol risk** — if upstream later ships its own impl of `truncateFallbackCommentBody` / `maxSynthesizedFallbackCommentRunes`, this new file redeclares them and breaks the package build. On next merge, `grep` upstream for the symbol first; if defined, drop the local file and take upstream's. |
 
 ## Pre-merge audit (run before every upstream merge)
 
@@ -112,7 +115,7 @@ git diff <tag>..HEAD -- <path>   # expect only deliberate deltas, not redundant 
 
 - **Migration numbering.** #5309 and the run-comment backfills add migrations (158/159/160/166-168 in various states). Upstream adds its own migrations continuously. On merge, renumber local migrations to sit above upstream's highest, per `docs/solutions/workflow-issues/unapplied-migrations-after-upstream-upgrade.md`. No DB foreign keys; concurrent indexes in single-statement files (repo hard rules).
 - **Locale files.** `packages/views/locales/*/{skills,issues}.json` are touched by several features (#5160, #2460) and by upstream constantly. Conflicts are frequent but trivial — take both key sets.
-- **The mention cluster is the recurring cost.** If upstream ever lands a native mention-chip system, expect to drop #5199 and #5346 together and re-apply only the skill-mention trigger logic on top of upstream's version. The shared hot file is `packages/views/editor/extensions/mention-view.tsx`.
+- **The mention cluster is the recurring cost.** If upstream ever lands a native mention-chip system, expect to drop #5199 and #5346 together and re-apply only the skill-mention gesture + bind-on-submit logic on top of upstream's version. The shared hot file is `packages/views/editor/extensions/mention-view.tsx`; the 7-17 @skill redesign widened the cluster's surface further into `content-editor.tsx`, `comment-input.tsx`, `comment-draft-store.ts`, and several new gesture files (see the redesign note under the mention cluster table).
 - **Rejected features compound silently.** #5539 was closed by upstream (2026-07-16) yet its code still lives in your leading commits — a rejected feature you forget about still drifts and still costs merge time. Track upstream rejections here the moment they happen. (Contrast #5466: self-withdrawn and fully reverted, so it carries **no** local footprint — see the Withdrawn table.)
 
 ## Related
