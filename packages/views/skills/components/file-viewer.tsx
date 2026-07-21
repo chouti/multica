@@ -7,7 +7,7 @@ import { Textarea } from "@multica/ui/components/ui/textarea";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
 import { parseFrontmatter } from "@multica/core/skills/frontmatter";
 import { FrontmatterCard } from "./frontmatter-card";
-import { Markdown } from "../../common/markdown";
+import { RichContent } from "../../rich-content";
 import { useT } from "../../i18n";
 
 function isMarkdown(path: string) {
@@ -80,9 +80,11 @@ export function FileViewer({
         {isMd && !editing ? (
           <div className="p-4 sm:p-6">
             {frontmatter && <FrontmatterCard data={frontmatter} />}
-            <Markdown mode="full">
-              {body || t(($) => $.file_viewer.no_content)}
-            </Markdown>
+            <RichContent
+              content={body || t(($) => $.file_viewer.no_content)}
+              density="document"
+              phase="settled"
+            />
           </div>
         ) : (
           <Textarea

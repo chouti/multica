@@ -1,5 +1,6 @@
 import { useId } from "react";
 import { Monitor } from "lucide-react";
+import qwenLogo from "./qwen-logo.svg";
 
 // Claude (Anthropic) — official mark, sourced from Bootstrap Icons (bi-claude)
 function ClaudeLogo({ className }: { className: string }) {
@@ -283,6 +284,21 @@ function GrokLogo({ className }: { className: string }) {
   );
 }
 
+// Qwen Code — official SVG copied verbatim from QwenLM/qwen-code's desktop
+// brand assets (packages/desktop/apps/electron/resources/brands/qwen-code/icon.svg).
+// Normalise via `as unknown` like antigravityLogoSrc above: the direct
+// `typeof === "string" ? : .src` form narrows to `never` under desktop's
+// vite/client `*.svg` declaration (plain string), which merges with the
+// `string | StaticImageAsset` union in assets.d.ts into plain string.
+const qwenLogoSrc: string = (() => {
+  const asset = qwenLogo as unknown;
+  return typeof asset === "string" ? asset : (asset as { src: string }).src;
+})();
+
+function QwenLogo({ className }: { className: string }) {
+  return <img src={qwenLogoSrc} alt="" aria-hidden className={className} />;
+}
+
 export function ProviderLogo({
   provider,
   className = "h-4 w-4",
@@ -323,6 +339,8 @@ export function ProviderLogo({
       return <TraeLogo className={className} />;
     case "grok":
       return <GrokLogo className={className} />;
+    case "qwen":
+      return <QwenLogo className={className} />;
     default:
       return <Monitor className={className} />;
   }

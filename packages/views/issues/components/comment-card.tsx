@@ -328,6 +328,7 @@ function useEditAttachmentState(
   const { uploadWithToast } = useEditorUpload();
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [initialValue, setInitialValue] = useState(entry.content ?? "");
   const editorRef = useRef<ContentEditorRef>(null);
   // Saving mid-upload would persist the edit without the file the user just
   // pasted in — same failure as posting a new comment.
@@ -369,10 +370,6 @@ function useEditAttachmentState(
   const setDraft = useCommentDraftStore((s) => s.setDraft);
   const clearDraft = useCommentDraftStore((s) => s.clearDraft);
 
-  const initialValue = editing
-    ? (getDraft(draftKey) ?? entry.content ?? "")
-    : (entry.content ?? "");
-
   useEffect(() => {
     const visible = new Set(triggerPreview.agents.map((agent) => agent.id));
     setSuppressedAgentIds((prev) => {
@@ -405,7 +402,9 @@ function useEditAttachmentState(
 
   const startEdit = () => {
     cancelledRef.current = false;
-    setContent(getDraft(draftKey) ?? entry.content ?? "");
+    const draft = getDraft(draftKey) ?? entry.content ?? "";
+    setInitialValue(draft);
+    setContent(draft);
     setRetainedStandaloneIds(initialStandaloneAttachmentIds(entry));
     setEditing(true);
   };

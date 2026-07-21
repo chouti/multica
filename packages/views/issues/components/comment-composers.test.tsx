@@ -9,6 +9,9 @@ import { CommentInput } from "./comment-input";
 import { ReplyInput } from "./reply-input";
 
 const uploadWithToast = vi.hoisted(() => vi.fn());
+const editorDefaultValues = vi.hoisted(() => ({
+  values: [] as Array<string | undefined>,
+}));
 
 vi.mock("@multica/core/api", () => ({
   api: {},
@@ -67,6 +70,7 @@ vi.mock("../../editor", async () => ({
     },
     ref: Ref<unknown>,
   ) {
+    editorDefaultValues.values.push(defaultValue);
     const valueRef = useRef(defaultValue ?? "");
     // Mirrors the real editor's `uploading` node attrs: the placeholder exists
     // from before the await until the upload settles, `hasActiveUploads` reads
@@ -236,9 +240,11 @@ function renderCommentInput(onSubmit = vi.fn().mockResolvedValue(true)) {
 function renderReplyInput({
   onSubmit = vi.fn().mockResolvedValue(true),
   size = "sm",
+  draftKey,
 }: {
   onSubmit?: (content: string, attachmentIds?: string[], suppressAgentIds?: string[]) => Promise<boolean>;
   size?: "sm" | "default";
+  draftKey?: `reply:${string}:${string}`;
 } = {}) {
   const view = renderWithProviders(
     <ReplyInput
@@ -248,6 +254,7 @@ function renderReplyInput({
       avatarId="user-1"
       onSubmit={onSubmit}
       size={size}
+      draftKey={draftKey}
     />,
   );
   return { ...view, onSubmit };
@@ -287,6 +294,7 @@ beforeEach(() => {
   // (e.g. the failed-send case) would trip the composers' draft-direct-mount
   // path and hide the shell the next test expects.
   useCommentDraftStore.setState({ drafts: {} });
+  editorDefaultValues.values = [];
 });
 
 describe("comment composers", () => {
@@ -357,6 +365,34 @@ describe("comment composers", () => {
     await waitFor(() => {
       expect(onSubmit).toHaveBeenCalledWith("thread reply", undefined, undefined, undefined);
     });
+  });
+
+  it("keeps the main comment editor's initial draft snapshot after persistence rerenders", () => {
+    renderCommentInput();
+    activateComposer("comment-composer-shell");
+
+    fireEvent.change(screen.getByTestId("editor"), {
+      target: { value: "test.de" },
+    });
+
+    expect(useCommentDraftStore.getState().getDraft("new:issue-1")).toBe("test.de");
+    expect(editorDefaultValues.values.at(-1)).toBeUndefined();
+  });
+
+  it("keeps the reply editor's initial draft snapshot after persistence rerenders", () => {
+    renderReplyInput({ draftKey: "reply:issue-1:comment-1" });
+    activateComposer("reply-composer-shell");
+
+    fireEvent.change(screen.getByTestId("editor"), {
+      target: { value: "test.de" },
+    });
+
+    expect(
+      useCommentDraftStore
+        .getState()
+        .getDraft("reply:issue-1:comment-1"),
+    ).toBe("test.de");
+    expect(editorDefaultValues.values.at(-1)).toBeUndefined();
   });
 
   it("locks the editor while the send is in flight, then clears on success", async () => {

@@ -61,9 +61,9 @@ function ReplyInput({
   const uploadGate = useUploadGate(editorRef);
   // If a draft key is provided, hydrate from store on mount (defaultValue is
   // the only injection point on ContentEditorRef) and flush on every onUpdate.
-  const initialDraftPayload = draftKey
-    ? useCommentDraftStore.getState().getDraftPayload(draftKey)
-    : undefined;
+  const [initialDraftPayload] = useState(() =>
+    draftKey ? useCommentDraftStore.getState().getDraftPayload(draftKey) : undefined,
+  );
   const initialDraft = initialDraftPayload?.content;
   const [content, setContent] = useState(initialDraft ?? "");
   const setDraft = useCommentDraftStore((s) => s.setDraft);
@@ -91,6 +91,7 @@ function ReplyInput({
   // rationale (drives both submit-time attachment_ids and editor previews).
   const [pendingAttachments, setPendingAttachments] = useState<Attachment[]>([]);
   const { uploadWithToast } = useEditorUpload();
+
   // Readonly-first: static shell until intent; an unsent draft mounts the
   // real editor immediately (see CommentInput). This is also what keeps the
   // reply box working across Virtuoso scroll-out — a typed draft rehydrates
