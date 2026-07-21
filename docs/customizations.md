@@ -18,7 +18,7 @@ tags: [local-customizations, upstream-pr, ledger, merge-strategy, self-hosted, d
 
 > **This is a living document.** Update it whenever you open/close an upstream PR, land a new local customization, or complete an upstream merge. It is the per-customization companion to the merge workflow in `docs/solutions/workflow-issues/safe-upstream-upgrade-with-local-customizations.md` (which covers the *mechanics* of one upgrade; this file tracks *what* you are carrying across all upgrades).
 
-*Audit 2026-07-21:* all tracked PR states unchanged since 2026-07-17 (no new merges/closes); @skill-mention redesign marked **EXECUTED**; registered one new pure-local build-fix (`truncateFallbackCommentBody`, GH #5455).
+*Audit 2026-07-21:* all tracked PR states unchanged since 2026-07-17 (no new merges/closes); @skill-mention redesign marked **EXECUTED**; registered pure-local build-fix `truncateFallbackCommentBody` (#5455) + `identifier-badge click-to-copy`. **Full v0.4.3→v0.4.6 pre-merge audit completed** — see the "v0.4.3 → v0.4.6 upgrade action list" section below. Headline: one high-conflict commit (`41315989b` editor autolink); readonly mention chips re-apply to the new `rich-content.tsx` (editable face untouched); local main sits at `v0.4.3`, 59 behind / 134 ahead of `origin/main`; 4 known migration duplicate-prefix collisions — **do NOT renumber**.
 
 ## Why this ledger exists
 
@@ -55,7 +55,7 @@ Two open PRs both modify the core mention render path (`packages/views/editor/ex
 
 | Feature | PR | Status | Key upstream files | Action on next merge |
 | --- | --- | --- | --- | --- |
-| Run-comment "View run" affordance | [#5309](https://github.com/multica-ai/multica/pull/5309) | OPEN (no review) | `handler/comment.go`, `migrations/166-168*`, comments UI | Carry; has DB migrations — renumber if upstream adds migrations (see Drift notes). |
+| Run-comment "View run" affordance | [#5309](https://github.com/multica-ai/multica/pull/5309) | OPEN (no review) | `handler/comment.go`, `migrations/158-160_backfill_comment_source_task_id*`, comments UI | Carry. Upstream `comment.go` is **untouched** in v0.4.3..v0.4.6 — zero conflict this round. The 158/159/160 backfills **collide with upstream's own 158/159/160** — tolerated via the duplicate-prefix lint map, do NOT renumber (see Drift notes). |
 | Member display name mgmt (invite + super-admin rename) | [#4118](https://github.com/multica-ai/multica/pull/4118) | OPEN (no review, stale since 06-23) | `cmd_admin.go`, `cmd_workspace.go`, `cmd/multica/main.go`, auth/invitation handlers | Carry; touches CLI + Go handlers — medium conflict rate. |
 | skills.sh 2-segment batch import | [#2669](https://github.com/multica-ai/multica/pull/2669) | OPEN (3 reviews — only PR with upstream engagement) | `handler/skill*.go`, `cmd/server/router.go`, `cmd_skill.go`, `core/api/client.ts` | Carry; most likely to merge eventually — re-check first. |
 | Adaptive skill discovery (import dialog) | [#5160](https://github.com/multica-ai/multica/pull/5160) | OPEN (no review) | `skills/components/runtime-local-skill-import-panel.tsx`, `locales/*/skills.json` | Carry. **Note:** local base never implemented `data-branch`, so its tests fail pre-existing — see SOP Step 7.5. |
@@ -91,6 +91,7 @@ These PRs were closed **by the author** and their code was never merged into loc
 | Issue prefix fallback to slug for non-latin workspace names | — | LOCAL | workspace/prefix logic | Own; small, low conflict. |
 | i18n three-dot ellipsis in backend loading copy | — | LOCAL | backend loading copy | Own; trivial. |
 | SkillProfileCard compact redesign + frontmatter | — | LOCAL | skills UI components | Own; overlaps #5160 area — resolve together. |
+| Issue identifier badge + click-to-copy on detail page | — | LOCAL | `issues/components/issue-identifier-badge.tsx` (new file), `issues/components/issue-detail.tsx`, `locales/*/issues.json` | Own; **shares `issue-detail.tsx` with the pin-comment-input customization** — resolve together on conflicts. Commits `ecd309bb0` / `13a638be8` / `2e009277d`. |
 | `truncateFallbackCommentBody` build-fix (fills symbol left dangling by upstream merge `24ea38dcb`; GH [#5455](https://github.com/multica-ai/multica/issues/5455), closed upstream 2026-07-16) | — | LOCAL | own new file `server/internal/service/fallback_comment_truncate.go` (24 lines, zero conflict) | Own; **duplicate-symbol risk** — if upstream later ships its own impl of `truncateFallbackCommentBody` / `maxSynthesizedFallbackCommentRunes`, this new file redeclares them and breaks the package build. On next merge, `grep` upstream for the symbol first; if defined, drop the local file and take upstream's. |
 
 ## Pre-merge audit (run before every upstream merge)
@@ -113,10 +114,57 @@ git diff <tag>..HEAD -- <path>   # expect only deliberate deltas, not redundant 
 
 ## Drift notes & gotchas
 
-- **Migration numbering.** #5309 and the run-comment backfills add migrations (158/159/160/166-168 in various states). Upstream adds its own migrations continuously. On merge, renumber local migrations to sit above upstream's highest, per `docs/solutions/workflow-issues/unapplied-migrations-after-upstream-upgrade.md`. No DB foreign keys; concurrent indexes in single-statement files (repo hard rules).
+- **Migration numbering — duplicate-prefix collisions are tolerated, do NOT renumber.** Local carries **4 known duplicate-prefix collisions** (each number has two unrelated files): `119` (`invitation_invitee_name` [#4118] vs upstream `user_created_at_index`), `158`/`159`/`160` (#5309 `backfill_comment_source_task_id*` vs upstream `agent_task_queue_chat_input_task_id` / `chat_message_message_kind` / `chat_message_input_owner_index`). These are **accepted legacy state**, tolerated via the `duplicate-prefix migration map` fixture in `server/internal/migrations/migrations_lint_test.go` (added in `c9b653c68`). **Do not renumber** — the migrations are already applied and recorded in `schema_migrations`; renumbering breaks the version trail on a running instance. Upstream v0.4.6 adds only `202_runtime_profile_add_qwen` (local head is `201`) — **no new collision this upgrade**. Maintain the lint map if upstream changes the migration lint mechanism. No DB foreign keys; concurrent indexes in single-statement files (repo hard rules).
 - **Locale files.** `packages/views/locales/*/{skills,issues}.json` are touched by several features (#5160, #2460) and by upstream constantly. Conflicts are frequent but trivial — take both key sets.
-- **The mention cluster is the recurring cost.** If upstream ever lands a native mention-chip system, expect to drop #5199 and #5346 together and re-apply only the skill-mention gesture + bind-on-submit logic on top of upstream's version. The shared hot file is `packages/views/editor/extensions/mention-view.tsx`; the 7-17 @skill redesign widened the cluster's surface further into `content-editor.tsx`, `comment-input.tsx`, `comment-draft-store.ts`, and several new gesture files (see the redesign note under the mention cluster table).
+- **The mention cluster is the recurring cost.** If upstream ever lands a native mention-chip system, expect to drop #5199 and #5346 together and re-apply only the skill-mention gesture + bind-on-submit logic on top of upstream's version. **v0.4.6 status (audited 2026-07-21): that precondition has NOT occurred** — upstream `5a11232c4` is a *renderer move* (hollows `readonly-content.tsx`, relocates read-only render to the new `packages/views/rich-content/rich-content.tsx`), not a native mention system; the `project-mention-a11y.test.tsx` in the new dir is just an a11y fix (`<span onClick>` → `<AppLink>`), not a chip system. So this round: re-apply the readonly chips into `rich-content.tsx` (the editable face — `mention-view.tsx` etc. — is untouched by upstream). The shared hot file is `packages/views/editor/extensions/mention-view.tsx`; the 7-17 @skill redesign widened the cluster's surface further into `content-editor.tsx`, `comment-input.tsx`, `comment-draft-store.ts`, and several new gesture files (see the redesign note under the mention cluster table, and the v0.4.6 action list below).
 - **Rejected features compound silently.** #5539 was closed by upstream (2026-07-16) yet its code still lives in your leading commits — a rejected feature you forget about still drifts and still costs merge time. Track upstream rejections here the moment they happen. (Contrast #5466: self-withdrawn and fully reverted, so it carries **no** local footprint — see the Withdrawn table.)
+- **The `'project'` token in `MENTION_MARKUP_SOURCE` is NOT a #5466 revival.** `a75305c27` (skill-mention cluster) added `'project'` to the markup-source enum purely for backend parity/completeness — there is no `@project` UI and no typed-mention code behind it. A future reviewer grepping `'project'` may misread it as #5466 (withdrawn @project typed mention) coming back. It is not; do not "clean it up" by removing it.
+
+## v0.4.3 → v0.4.6 upgrade action list (audited 2026-07-21)
+
+Pre-merge audit for the next upgrade. Local `main` sits at `v0.4.3` (`git describe --tags`); upstream is at `v0.4.6` — 59 commits behind / 134 ahead of `origin/main`. Overall difficulty is **far below the v0.3.42 ActorAvatar refactor** (that was 35 commits / 50+ files): one high-conflict commit, three big Go customizations untouched. Strategies A/B/C/D per SOP Step 4. Sourced from a 3-agent fan-out audit plus independent verification.
+
+### Workload concentration — the one real cost center
+
+| Commit | What it does | Local hot files hit | Strategy | Difficulty |
+| --- | --- | --- | --- | --- |
+| **`41315989b`** fix(editor): prevent incorrect comment autolinks | Refactors `ContentEditor` `defaultValue` → `defaultValue\|value` union; renames `lastDefaultValueRef`→`lastSyncedValueRef` | `content-editor.tsx`, `issue-detail.tsx`, `comment-card.tsx`, `comment-input.tsx`, `reply-input.tsx` (all carry local @skill / pin / identifier-badge changes) | **C + D** | **High** |
+| `content-editor.tsx` (three-way) | — | hit by `5a11232c4` (preprocess call) **+** `41315989b` (signature) **+** local #5346 (+58 gesture) | three-way manual merge | High |
+
+### Mention cluster — readonly re-apply (decision 2026-07-21: re-apply, strategy C)
+
+Upstream `5a11232c4` "unify Chat and Issue/Comment on one RichContent renderer" **hollows out `readonly-content.tsx` (556 → ~40-line wrapper)** and moves read-only render into the new `packages/views/rich-content/rich-content.tsx`. The blow is **narrower than feared** — it hits only the **readonly face**; the editable face (`mention-view.tsx`, `mention-hover-card.tsx`, `skill-agent-picker.tsx`, `comment-trigger-chips.tsx`) is **zero-touched** by upstream.
+
+- **Renderer move, NOT a native mention system** (see Drift notes). Re-apply both readonly chips in ONE edit to `rich-content.tsx`'s `RichLink`: restore the actor-chip dispatch (deleted `readonly-content.tsx:297-320` → `MentionHoverCard` + `ActorMentionChip`) and the skill-chip branch (deleted `:321-338` → `MentionHoverCard` + `SkillMentionChip`). Resolve #5199 and #5346 together — same code site.
+- The chip components themselves survive upstream untouched.
+- **Caveat:** upstream's static `COMPONENTS` map is deliberately anti-fork ("no second render branch"); re-introducing a branch is architecturally tense and will recur every RichContent refactor. Decision: re-apply anyway to keep full readonly UX.
+- **Mechanical must-do:** `preprocessMarkdown` signature became required `{ cdnDomain: string; ... }`. Patch the 3 call sites — `readonly-content.tsx:511` (will move with the renderer), `content-editor.tsx:442`, `content-editor.tsx:617`. No other call sites exist (`grep -rn "preprocessMarkdown(" packages/` confirmed).
+
+### Untouched by upstream — strategy B, keep as-is
+
+The three heaviest local Go customizations are **zero-conflict**: `comment.go` (@skill + #5309, +456 lines), `skill.go` / `cmd_skill.go` / `skill.sql` (#2669), admin/invitation handlers (#4118). Upstream's 59 commits do not touch them.
+
+### router.go — strategy D (orthogonal)
+
+Local 3 edits (provenance `officialBaseline`, `/api/admin` group, `/import/batch`) vs upstream 3 new routes (`/query` from `002ea0d87`, `/cron-preview` from `465546b83`, `/gc-check` from `18d41151e`) sit in **different route groups** — git will likely auto-merge or need minimal manual touch.
+
+### Migrations — DO NOT renumber (see Drift notes)
+
+Upstream adds only `202_runtime_profile_add_qwen`; local head is `201`. No new collision. Local's 4 known duplicate-prefix collisions (119/158/159/160) stay tolerated via the lint fixture.
+
+### Secondary conflicts (low–medium)
+
+- `002ea0d87` configurable issue table view (6000+ lines): ~90% of files have zero local footprint; hotspots are `router.go` one route (D), `client.ts` different methods (D), `mutations.ts` per-line (C). Medium.
+- `f8bf6cd8b` Qwen runtime: `packages/core/types/agent.ts` is also locally touched (#5309 type sync) — per-line (C). Medium. Also brings the `202` migration (no collision).
+- `ce1530049` agent working-chip colour tiers: local untouched in the hit files (`button.tsx`, `workspace-agent-working-chip.tsx`, etc.); only `issues.json` overlaps → take-both (B). Low.
+- locales (`issues.json` / `editor.json` × several commits): trivial, keys don't overlap → take-both (B). Watch `002ea0d87`'s `issues.json` +68-line nested object — merge keys at the same level, don't drop local skill keys into a new upstream object.
+
+### Ledger corrections applied in this audit
+
+- Drift-note migration section rewritten (was stale "#5309 carries 158/159/160/166-168, renumber").
+- Drift-note mention section: added "renderer move, not native mention" clarification.
+- Registered previously-untracked `identifier-badge click-to-copy` (Pure-local table).
+- Added `'project'` token anti-misread note (Drift notes).
 
 ## Related
 
