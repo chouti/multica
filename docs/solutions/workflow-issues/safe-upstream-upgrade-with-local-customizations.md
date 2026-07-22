@@ -202,6 +202,20 @@ pnpm test <test-file>
 
 Still failing with the backup source → the failure is **pre-existing** in your local base (the test was already broken; the merge just surfaced it because you ran the full suite). Pass with backup source + fails with post-merge → **merge-introduced**, port or adapt. Apply per test file, not globally — the source-swap procedure partitions failures into the two buckets in seconds without a full rebase. Worked case: `packages/views/skills/components/runtime-local-skill-import-panel.test.tsx` had 5 failures attributable to the local base (#5160 adaptive skill discovery was never implemented — no `data-branch` attribute), while 4 other failures in `issue-detail.test.tsx` were genuine merge artifacts (official #5403 render overhaul doubled-rendered the issue title across the breadcrumb leaf + main header). Limitation: if the test file itself was modified by the merge, source-only checkout does not isolate the variable — copy the backup test to a scratch path and rerun with both source versions.
 
+**7.6 — Re-stamp the release baseline (or the Help menu lies).** Step 7's `pnpm build` and `go build ./...` do NOT carry the version tag, so after restart the in-app Help menu shows a stale frontend version and "Backend unavailable". Two injection points must be re-stamped by hand (there is no `make upgrade` target in this checkout):
+
+```bash
+# Frontend: bump the hard-coded env, then rebuild (NEXT_PUBLIC_* is inlined at build time)
+$EDITOR .env   # set NEXT_PUBLIC_APP_VERSION=vX.Y.Z (clean tag, not git describe)
+pnpm build
+
+# Backend: stamp main.version via -ldflags, then run the binary (NOT bare go run, which leaves "dev")
+BASELINE=$(scripts/resolve-official-baseline.sh)   # emits a clean vX.Y.Z or exits non-zero
+go build -C server -o bin/server -ldflags "-X main.version=$BASELINE" ./cmd/server
+```
+
+Use the **clean tag** — `git describe` on a checkout past the tag yields `vX.Y.Z-NNN-g<hash>`, and the provenance sanitizer (`officialBaseline`) deliberately maps `dev`, `-dirty`, and describe-suffixed values to empty, which `omitempty` drops from `/api/config`. That silent-failure is by design (never present a hash/"dev" as a release baseline), but it means a forgotten re-stamp looks like "backend broken" while the service is healthy. Verify: `curl /api/config` returns `server_version`, and the Help menu shows both rows. Full reasoning: `docs/solutions/workflow-issues/version-reporting-after-upstream-upgrade.md`.
+
 ### Step 8: Restart services and verify
 
 ```bash
@@ -336,3 +350,4 @@ git cherry-pick <commit1> <commit2> ...
 - `docs/solutions/workflow-issues/upstream-api-divergence-cherry-pick-port.md` — Documents how upstream API divergence turns a simple cherry-pick into a porting exercise requiring feature adaptation, directly relevant to Step 5.
 - `docs/solutions/workflow-issues/pnpm-install-after-upstream-merge.md` — The missing `pnpm install` step that causes confusing build failures after merging upstream package.json changes, addressed in Step 6.
 - `docs/solutions/workflow-issues/unapplied-migrations-after-upstream-upgrade.md` — A sibling "post-merge step the workflow forgot": after the v0.3.42 merge `migrate up` had not been run, silently breaking the issue execution-log list (usage endpoint 200 while task-runs 500). This SOP's Step 7 now runs it.
+- `docs/solutions/workflow-issues/version-reporting-after-upstream-upgrade.md` — Another "post-merge step the workflow forgot": Step 7/8 do not re-stamp the version baselines, so the Help menu shows a stale frontend tag and "Backend unavailable" until you bump `.env` + `-ldflags` rebuild. This SOP's Step 7.6 now covers it.

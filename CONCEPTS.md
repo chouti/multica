@@ -21,6 +21,8 @@ The nearest reachable upstream official release tag a self-hosted build is based
 
 Resolved on the host by `scripts/resolve-official-baseline.sh`, which verifies the candidate against the canonical upstream (`https://github.com/multica-ai/multica`) via `git ls-remote`. The single canonical-upstream URL constant lives in that script — a heavily-forked deployment that tracks a different upstream should retarget it in one place.
 
+The frontend (`packages/core/config`) and backend (`server/cmd/server/provenance_baseline.go`) each run an `officialBaseline` sanitizer that maps `""`, `"dev"`, any non-`^v\d` string, any `-dirty` value, and any `git describe` commit-distance suffix (`-N-g<hash>`) to empty. An empty baseline is omitted from `/api/config` (`server_version` is `omitempty`) and rendered as "unavailable" in the Help menu — a deliberate silent-failure so an unstamped build never presents a hash or "dev" as a release baseline. The corollary operators hit: a forgotten re-stamp after an upgrade looks like "backend broken" while the service is healthy.
+
 ---
 
 ## Status Concepts
