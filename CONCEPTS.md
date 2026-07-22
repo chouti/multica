@@ -23,6 +23,12 @@ Resolved on the host by `scripts/resolve-official-baseline.sh`, which verifies t
 
 The frontend (`packages/core/config`) and backend (`server/cmd/server/provenance_baseline.go`) each run an `officialBaseline` sanitizer that maps `""`, `"dev"`, any non-`^v\d` string, any `-dirty` value, and any `git describe` commit-distance suffix (`-N-g<hash>`) to empty. An empty baseline is omitted from `/api/config` (`server_version` is `omitempty`) and rendered as "unavailable" in the Help menu — a deliberate silent-failure so an unstamped build never presents a hash or "dev" as a release baseline. The corollary operators hit: a forgotten re-stamp after an upgrade looks like "backend broken" while the service is healthy.
 
+### Member
+A human user's presence in one workspace — the join of a global human identity to a specific workspace. The person behind it carries a single **global user id** shared across every workspace; a member mention is resolved by that global user id joined to the workspace, so it is workspace-portable and needs no re-localization when content is copied between workspaces. A member's own per-workspace row id is **not** what a member mention resolves on. Contrast with **Agent**, whose id is per-workspace. Corollary for any reference: verify it against the field the resolution path actually filters on (here, the global user id), not merely by whether some id value exists in a table.
+
+### Agent
+An AI worker inside a workspace, first-class as an assignee that can own issues, comment, and change status. An agent is a **per-workspace entity with an independent id** — the "same" agent (e.g. the same persona) in two workspaces is two distinct rows with two distinct ids, with no shared identity across workspaces. Agent references (`mention://agent/<id>`, roster/routing tables) are therefore workspace-local and must be re-localized per workspace when configuration is copied; member references are not (see **Member**).
+
 ---
 
 ## Status Concepts
@@ -59,3 +65,4 @@ The three-state model describing who can invoke (trigger) an agent: **workspace*
 - **Skill Import** transfers a **Skill** from a **Runtime** into a workspace.
 - **Branch (UI)** determines which rendering path is shown based on skill count in a list dialog.
 - An **Official Release Baseline** identifies the upstream release context of a running backend or frontend artifact without asserting that the artifact is an unmodified official image.
+- A **Member** is a global human id joined to one workspace, so a member reference is workspace-portable; an **Agent** is scoped to one workspace, so an agent reference is workspace-local and must be re-localized on copy.
