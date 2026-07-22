@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.fengzhao.multica-backend</string>
+
+    <!-- run-backend.sh sources .env (PORT/DATABASE_URL/...) and exec's the
+         server binary with cwd pinned to the repo root. -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>/Users/fengzhao/.multica/scripts/run-backend.sh</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/fengzhao/multica</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
+
+    <key>StandardOutPath</key>
+    <string>/Users/fengzhao/.multica/logs/backend.out.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/Users/fengzhao/.multica/logs/backend.err.log</string>
+</dict>
+</plist>

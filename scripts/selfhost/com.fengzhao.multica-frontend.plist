@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.fengzhao.multica-frontend</string>
+
+    <!-- Absolute node path so the job doesn't depend on PATH resolution. -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/fengzhao/.nvm/versions/node/v24.15.0/bin/node</string>
+        <string>/Users/fengzhao/.multica/frontend/apps/web/server.js</string>
+    </array>
+
+    <!-- cwd = standalone deploy root, so server.js resolves apps/web/.next/static
+         and apps/web/public relative to here. -->
+    <key>WorkingDirectory</key>
+    <string>/Users/fengzhao/.multica/frontend</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PORT</key>
+        <string>3001</string>
+        <key>HOSTNAME</key>
+        <string>127.0.0.1</string>
+        <key>NODE_ENV</key>
+        <string>production</string>
+        <key>PATH</key>
+        <string>/Users/fengzhao/.nvm/versions/node/v24.15.0/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <!-- Restart on crash (non-zero exit). -->
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
+
+    <key>StandardOutPath</key>
+    <string>/Users/fengzhao/.multica/logs/frontend.out.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/Users/fengzhao/.multica/logs/frontend.err.log</string>
+</dict>
+</plist>
