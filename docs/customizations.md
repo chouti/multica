@@ -18,7 +18,7 @@ tags: [local-customizations, upstream-pr, ledger, merge-strategy, self-hosted, d
 
 > **This is a living document.** Update it whenever you open/close an upstream PR, land a new local customization, or complete an upstream merge. It is the per-customization companion to the merge workflow in `docs/solutions/workflow-issues/safe-upstream-upgrade-with-local-customizations.md` (which covers the *mechanics* of one upgrade; this file tracks *what* you are carrying across all upgrades).
 
-*Audit 2026-07-21:* all tracked PR states unchanged since 2026-07-17 (no new merges/closes); @skill-mention redesign marked **EXECUTED**; registered pure-local build-fix `truncateFallbackCommentBody` (#5455) + `identifier-badge click-to-copy`. **Full v0.4.3→v0.4.6 pre-merge audit completed** — see the "v0.4.3 → v0.4.6 upgrade action list" section below. Headline: one high-conflict commit (`41315989b` editor autolink); readonly mention chips re-apply to the new `rich-content.tsx` (editable face untouched); local main sits at `v0.4.3`, 59 behind / 134 ahead of `origin/main`; 4 known migration duplicate-prefix collisions — **do NOT renumber**. **✅ v0.4.6 upgrade EXECUTED 2026-07-21** (merge `36dbc22ba`, base now `v0.4.6`); see the action list section for actuals vs plan.
+*Audit 2026-07-21:* all tracked PR states unchanged since 2026-07-17 (no new merges/closes); @skill-mention redesign marked **EXECUTED**; registered pure-local build-fix `truncateFallbackCommentBody` (#5455) + `identifier-badge click-to-copy`. **Full v0.4.3→v0.4.6 pre-merge audit completed** — headline: one high-conflict commit (`41315989b` editor autolink); readonly mention chips re-apply to the new `rich-content.tsx` (editable face untouched); local main sat at `v0.4.3`, 59 behind / 134 ahead of `origin/main`; 4 known migration duplicate-prefix collisions — **do NOT renumber**. **✅ v0.4.6 upgrade EXECUTED 2026-07-21** (merge `36dbc22ba`, base now `v0.4.6`); the per-file strategy, verified negative claims, and actuals-vs-plan live in the process artifact `docs/upgrades/v0.4.6-plan.md` (see the "Last upgrade" section below).
 
 ## Why this ledger exists
 
@@ -117,57 +117,19 @@ git diff <tag>..HEAD -- <path>   # expect only deliberate deltas, not redundant 
 
 - **Migration numbering — duplicate-prefix collisions are tolerated, do NOT renumber.** Local carries **4 known duplicate-prefix collisions** (each number has two unrelated files): `119` (`invitation_invitee_name` [#4118] vs upstream `user_created_at_index`), `158`/`159`/`160` (#5309 `backfill_comment_source_task_id*` vs upstream `agent_task_queue_chat_input_task_id` / `chat_message_message_kind` / `chat_message_input_owner_index`). These are **accepted legacy state**, tolerated via the `duplicate-prefix migration map` fixture in `server/internal/migrations/migrations_lint_test.go`. **Fixed 2026-07-21 (eval-found bug):** the map previously listed only up to `119`/`128`, so `TestMigrationNumericPrefixesStayUniqueAfterLegacySet` was **failing red** on `158`/`159`/`160` — the three were added to `legacyDuplicateMigrationStems` (their stems), test now passes. Found by a skill-eval baseline, confirmed by running the test; the earlier claim "158-160 tolerated via the map" was wrong. **Do not renumber** — the migrations are already applied and recorded in `schema_migrations`; renumbering breaks the version trail on a running instance. Upstream v0.4.6 adds only `202_runtime_profile_add_qwen` (local head is `201`) — **no new collision this upgrade**. Maintain the lint map if upstream changes the migration lint mechanism. No DB foreign keys; concurrent indexes in single-statement files (repo hard rules).
 - **Locale files.** `packages/views/locales/*/{skills,issues}.json` are touched by several features (#5160, #2460) and by upstream constantly. Conflicts are frequent but trivial — take both key sets.
-- **The mention cluster is the recurring cost.** If upstream ever lands a native mention-chip system, expect to drop #5199 and #5346 together and re-apply only the skill-mention gesture + bind-on-submit logic on top of upstream's version. **v0.4.6 status (audited 2026-07-21): that precondition has NOT occurred** — upstream `5a11232c4` is a *renderer move* (hollows `readonly-content.tsx`, relocates read-only render to the new `packages/views/rich-content/rich-content.tsx`), not a native mention system; the `project-mention-a11y.test.tsx` in the new dir is just an a11y fix (`<span onClick>` → `<AppLink>`), not a chip system. So this round: re-apply the readonly chips into `rich-content.tsx` (the editable face — `mention-view.tsx` etc. — is untouched by upstream). The shared hot file is `packages/views/editor/extensions/mention-view.tsx`; the 7-17 @skill redesign widened the cluster's surface further into `content-editor.tsx`, `comment-input.tsx`, `comment-draft-store.ts`, and several new gesture files (see the redesign note under the mention cluster table, and the v0.4.6 action list below).
+- **The mention cluster is the recurring cost.** If upstream ever lands a native mention-chip system, expect to drop #5199 and #5346 together and re-apply only the skill-mention gesture + bind-on-submit logic on top of upstream's version. **v0.4.6 status (audited 2026-07-21): that precondition has NOT occurred** — upstream `5a11232c4` is a *renderer move* (hollows `readonly-content.tsx`, relocates read-only render to the new `packages/views/rich-content/rich-content.tsx`), not a native mention system; the `project-mention-a11y.test.tsx` in the new dir is just an a11y fix (`<span onClick>` → `<AppLink>`), not a chip system. So this round: re-apply the readonly chips into `rich-content.tsx` (the editable face — `mention-view.tsx` etc. — is untouched by upstream). The shared hot file is `packages/views/editor/extensions/mention-view.tsx`; the 7-17 @skill redesign widened the cluster's surface further into `content-editor.tsx`, `comment-input.tsx`, `comment-draft-store.ts`, and several new gesture files (see the redesign note under the mention cluster table, and `docs/upgrades/v0.4.6-plan.md`).
 - **Rejected features compound silently.** #5539 was closed by upstream (2026-07-16) yet its code still lives in your leading commits — a rejected feature you forget about still drifts and still costs merge time. Track upstream rejections here the moment they happen. (Contrast #5466: self-withdrawn and fully reverted, so it carries **no** local footprint — see the Withdrawn table.)
 - **The `'project'` token in `MENTION_MARKUP_SOURCE` is NOT a #5466 revival.** `a75305c27` (skill-mention cluster) added `'project'` to the markup-source enum purely for backend parity/completeness — there is no `@project` UI and no typed-mention code behind it. A future reviewer grepping `'project'` may misread it as #5466 (withdrawn @project typed mention) coming back. It is not; do not "clean it up" by removing it.
 
-## v0.4.3 → v0.4.6 upgrade action list (audited 2026-07-21)
+## Last upgrade — v0.4.3 → v0.4.6 (EXECUTED 2026-07-21)
 
-> ✅ **EXECUTED 2026-07-21** — merge `36dbc22ba`, base now `v0.4.6-145-g36dbc22ba`. Actuals vs plan: only 7 conflicts (the predicted high-conflict `41315989b` cost just comment-input/reply-input at 1 hunk each — content-editor/issue-detail/comment-card all auto-merged clean); readonly actor+skill chips re-applied to `rich-content.tsx` in one edit; 2 post-merge type fixes (file-viewer unused `SkillFrontmatter` import; provider-logo `qwenLogo` via `as unknown` matching the in-file `antigravityLogoSrc` pattern); `migrate up` applied only `202`; services restarted via `go run` + `pnpm dev:web`. Verification green: typecheck (6) / go build / pnpm test (2887) / pnpm build (3); frontend `/` → 200, backend `/healthz` → 200. DB backed up at `~/multica-backups/v0.4.6-pre-migrate-*.dump`. **Skipped:** `make test` / `make start` — both call `ensure-postgres.sh` which needs Docker, unavailable on this Homebrew-pg self-host. **Post-execution fix (eval-found):** `TestMigrationNumericPrefixesStayUniqueAfterLegacySet` was failing on 158/159/160 (map missed the three); added to `legacyDuplicateMigrationStems`, test green (`384e5de0a`). The plan below is kept for the record.
+✅ **EXECUTED 2026-07-21** — merge `36dbc22ba`, base now `v0.4.6-145-g36dbc22ba`. Verification green: typecheck / go build / pnpm test (2887) / pnpm build. Frontend `/` → 200, backend `/healthz` → 200. DB backed up at `~/multica-backups/v0.4.6-pre-migrate-*.dump`. `make test`/`make start` skipped (need Docker, unavailable on this Homebrew-pg self-host). Post-execution fix (eval-found): `TestMigrationNumericPrefixesStayUniqueAfterLegacySet` was failing on 158/159/160 (lint map missed them); fixed `384e5de0a`.
 
-Pre-merge audit for the next upgrade. Local `main` sits at `v0.4.3` (`git describe --tags`); upstream is at `v0.4.6` — 59 commits behind / 134 ahead of `origin/main`. Overall difficulty is **far below the v0.3.42 ActorAvatar refactor** (that was 35 commits / 50+ files): one high-conflict commit, three big Go customizations untouched. Strategies A/B/C/D per SOP Step 4. Sourced from a 3-agent fan-out audit plus independent verification.
+The full per-file strategy table, negative-claim verification, and Phase-by-Phase record for **this** upgrade live in its process artifact:
 
-### Workload concentration — the one real cost center
+→ **`docs/upgrades/v0.4.6-plan.md`** (frontmatter `upgrade_contract: selfhost-upgrade/v1`, `phase: done`)
 
-| Commit | What it does | Local hot files hit | Strategy | Difficulty |
-| --- | --- | --- | --- | --- |
-| **`41315989b`** fix(editor): prevent incorrect comment autolinks | Refactors `ContentEditor` `defaultValue` → `defaultValue\|value` union; renames `lastDefaultValueRef`→`lastSyncedValueRef` | `content-editor.tsx`, `issue-detail.tsx`, `comment-card.tsx`, `comment-input.tsx`, `reply-input.tsx` (all carry local @skill / pin / identifier-badge changes) | **C + D** | **High** |
-| `content-editor.tsx` (three-way) | — | hit by `5a11232c4` (preprocess call) **+** `41315989b` (signature) **+** local #5346 (+58 gesture) | three-way manual merge | High |
-
-### Mention cluster — readonly re-apply (decision 2026-07-21: re-apply, strategy C)
-
-Upstream `5a11232c4` "unify Chat and Issue/Comment on one RichContent renderer" **hollows out `readonly-content.tsx` (556 → ~40-line wrapper)** and moves read-only render into the new `packages/views/rich-content/rich-content.tsx`. The blow is **narrower than feared** — it hits only the **readonly face**; the editable face (`mention-view.tsx`, `mention-hover-card.tsx`, `skill-agent-picker.tsx`, `comment-trigger-chips.tsx`) is **zero-touched** by upstream.
-
-- **Renderer move, NOT a native mention system** (see Drift notes). Re-apply both readonly chips in ONE edit to `rich-content.tsx`'s `RichLink`: restore the actor-chip dispatch (deleted `readonly-content.tsx:297-320` → `MentionHoverCard` + `ActorMentionChip`) and the skill-chip branch (deleted `:321-338` → `MentionHoverCard` + `SkillMentionChip`). Resolve #5199 and #5346 together — same code site.
-- The chip components themselves survive upstream untouched.
-- **Caveat:** upstream's static `COMPONENTS` map is deliberately anti-fork ("no second render branch"); re-introducing a branch is architecturally tense and will recur every RichContent refactor. Decision: re-apply anyway to keep full readonly UX.
-- **Mechanical must-do:** `preprocessMarkdown` signature became required `{ cdnDomain: string; ... }`. Patch the 3 call sites — `readonly-content.tsx:511` (will move with the renderer), `content-editor.tsx:442`, `content-editor.tsx:617`. No other call sites exist (`grep -rn "preprocessMarkdown(" packages/` confirmed).
-
-### Untouched by upstream — strategy B, keep as-is
-
-The three heaviest local Go customizations are **zero-conflict**: `comment.go` (@skill + #5309, +456 lines), `skill.go` / `cmd_skill.go` / `skill.sql` (#2669), admin/invitation handlers (#4118). Upstream's 59 commits do not touch them.
-
-### router.go — strategy D (orthogonal)
-
-Local 3 edits (provenance `officialBaseline`, `/api/admin` group, `/import/batch`) vs upstream 3 new routes (`/query` from `002ea0d87`, `/cron-preview` from `465546b83`, `/gc-check` from `18d41151e`) sit in **different route groups** — git will likely auto-merge or need minimal manual touch.
-
-### Migrations — DO NOT renumber (see Drift notes)
-
-Upstream adds only `202_runtime_profile_add_qwen`; local head is `201`. No new collision. Local's 4 known duplicate-prefix collisions (119/158/159/160) stay tolerated via the lint fixture.
-
-### Secondary conflicts (low–medium)
-
-- `002ea0d87` configurable issue table view (6000+ lines): ~90% of files have zero local footprint; hotspots are `router.go` one route (D), `client.ts` different methods (D), `mutations.ts` per-line (C). Medium.
-- `f8bf6cd8b` Qwen runtime: `packages/core/types/agent.ts` is also locally touched (#5309 type sync) — per-line (C). Medium. Also brings the `202` migration (no collision).
-- `ce1530049` agent working-chip colour tiers: local untouched in the hit files (`button.tsx`, `workspace-agent-working-chip.tsx`, etc.); only `issues.json` overlaps → take-both (B). Low.
-- locales (`issues.json` / `editor.json` × several commits): trivial, keys don't overlap → take-both (B). Watch `002ea0d87`'s `issues.json` +68-line nested object — merge keys at the same level, don't drop local skill keys into a new upstream object.
-
-### Ledger corrections applied in this audit
-
-- Drift-note migration section rewritten (was stale "#5309 carries 158/159/160/166-168, renumber").
-- Drift-note mention section: added "renderer move, not native mention" clarification.
-- Registered previously-untracked `identifier-badge click-to-copy` (Pure-local table).
-- Added `'project'` token anti-misread note (Drift notes).
+Every future upgrade gets its own `docs/upgrades/<tag>-plan.md`; the per-upgrade process lives there, not in this ledger.
 
 ## Related
 
