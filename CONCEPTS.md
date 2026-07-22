@@ -14,7 +14,7 @@ An agent-loadable instruction set that augments an AI agent's capabilities. Skil
 A daemon-managed execution environment that exposes local skills for import. Runtimes are polled for available skills (typically every 500ms with a 30s timeout) and provide the source from which skills are copied into a workspace. Each runtime has a unique ID and status (online/offline).
 
 ### Daemon
-The local agent process that manages runtime lifecycle, skill discovery, and agent execution. Daemons run on developer machines and expose skills through a discovery API that the backend polls. Older daemons may omit the `root` field on skill records.
+The local agent process that manages runtime lifecycle, skill discovery, and agent execution. Daemons run on developer machines and expose skills through a discovery API that the backend polls. Its HTTP port is for health/runtime status only — it is not the workspace HTTP API server and does not serve `/api` requests or uploaded files; conflating the daemon with the API server is a common cause of self-host 502s. Older daemons may omit the `root` field on skill records.
 
 ### Official Release Baseline
 The nearest reachable upstream official release tag a self-hosted build is based on, verified against the canonical upstream release tags at build time. It is embedded into the backend binary or frontend bundle at build time and is intentionally distinct from the checkout's exact commit, dirty state, image tag, and deployment configuration. A build whose baseline cannot be derived and verified against the upstream tags—or explicitly trusted by the operator—must not claim one.

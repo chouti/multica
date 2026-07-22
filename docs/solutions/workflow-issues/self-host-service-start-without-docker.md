@@ -44,6 +44,8 @@ This is the operational substrate beneath two sibling gotchas from the same upgr
 
 Every Makefile target below has a bare-process substitute. The recurring pattern is: **source `.env` so `PORT`, `FRONTEND_PORT`, and `DATABASE_URL` are exported, then run the Go/Next binary directly.** Without sourcing `.env` you either hit the Docker gate or fall back to a wrong-default port.
 
+> **Production always-on (since 2026-07-22).** For a continuously-running, boot-self-starting, crash-recovering deployment, prefer the **launchd + standalone** setup (`bash scripts/selfhost/install.sh`), documented in `docs/solutions/runtime-errors/caddy-standalone-launchd.md`. The bare-process commands below remain the correct path for **dev, test, migrate, ad-hoc restarts**, and any host without launchd/pm2 supervision.
+
 **Backend start (→ :8081).** `make start` / `make server` both gate on Docker; substitute:
 
 ```sh
@@ -157,6 +159,7 @@ go test -C server ./internal/migrations/
 
 ## Related
 
+- `docs/solutions/runtime-errors/caddy-standalone-launchd.md` — the launchd + standalone production setup that supersedes the bare-process frontend/backend commands below for always-on deployment; this doc covers the dev/test/migrate/ad-hoc path.
 - `docs/solutions/workflow-issues/safe-upstream-upgrade-with-local-customizations.md` — umbrella upgrade SOP; its Step 7 (`make test`) and Step 8 (`pm2 restart`) are exactly the steps these bare-process substitutions replace.
 - `docs/solutions/workflow-issues/unapplied-migrations-after-upstream-upgrade.md` — authoritative source for the `DATABASE_URL`-from-`.env` / `:5433` migrate fact; cited rather than re-derived.
 - `docs/solutions/test-failures/migration-lint-duplicate-prefix-whitelist-gap.md` — the red migration lint test that stayed hidden because `make test` is Docker-gated; its "Prevention" independently prescribes running the lint test directly.
