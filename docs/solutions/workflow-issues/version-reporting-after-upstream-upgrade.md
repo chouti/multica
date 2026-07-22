@@ -85,5 +85,6 @@ After both re-stamps, all three observations converge on the target tag:
 
 - `docs/solutions/architecture-patterns/runtime-build-provenance.md` — full design doc for the provenance feature and the sanitizer's four resolution semantics (originating PR #5539, CLOSED 2026-07-16).
 - `docs/solutions/workflow-issues/safe-upstream-upgrade-with-local-customizations.md` — the upgrade SOP whose Step 7/8 omit version re-stamping; this doc is the sibling that fills that gap (same "post-merge step the workflow forgot" family as `unapplied-migrations-after-upstream-upgrade` and `pnpm-install-after-upstream-merge`).
+- `docs/solutions/test-failures/migration-lint-duplicate-prefix-whitelist-gap.md` — companion from the same v0.4.6 upgrade; shares the meta-pattern of a self-host gotcha staying hidden because `make test`/`make start` are Docker-gated and skipped on Homebrew-pg self-host.
 - `docs/customizations.md` — ledger entry for the provenance customization (#5539), including this re-stamp gotcha.
 - `scripts/resolve-official-baseline.sh` — supported helper that derives a clean official tag (or fails) so build paths never emit `dev`/hash/dirty.
