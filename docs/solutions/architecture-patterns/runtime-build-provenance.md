@@ -249,7 +249,7 @@ Each state is honest, distinct, and actionable.
 
 - **Direct build from checkout** (`make selfhost-build`) — host resolver, then Docker build with both `VERSION` and `NEXT_PUBLIC_APP_VERSION` set.
 - **Direct production build, no Docker** (`make build-prod`) — same resolver, builds `server/bin/server` and `apps/web/.next/...` directly. Fails fast if the baseline cannot be resolved.
-- **Direct production upgrade, no Docker** (`make upgrade`) — same resolver, also rewrites `.env`'s `NEXT_PUBLIC_APP_VERSION` (with `.env.bak`) and rebuilds both halves. The operator then restarts their supervised processes (pm2, systemd, nohup); the target intentionally does not kill them because the supervisor varies per deployment.
+- **Direct production upgrade, no Docker** (`make upgrade`) — same resolver, also rewrites `.env`'s `NEXT_PUBLIC_APP_VERSION` (with `.env.bak`) and rebuilds both halves. The operator then restarts their supervised processes (pm2, systemd, nohup); the target intentionally does not kill them because the supervisor varies per deployment. **Drift note (2026-07-22):** this checkout's Makefile does **not** define an `upgrade` target (`make upgrade` → `No rule to make target`); only `make build-prod` exists. The manual re-stamp fallback (bump `.env` `NEXT_PUBLIC_APP_VERSION` + `go build -ldflags "-X main.version=<tag>"` + `pnpm build`) is documented in `docs/solutions/workflow-issues/version-reporting-after-upstream-upgrade.md`.
 - **Recovery when baseline can't be resolved** — `export MULTICA_TRUSTED_BASELINE=vX.Y.Z` before any of the above. Enumerated failure modes: shallow clone without tags, source archive without `.git`, fork whose `v*` tags aren't on the canonical upstream, offline / air-gapped host.
 
 ## What is NOT in scope

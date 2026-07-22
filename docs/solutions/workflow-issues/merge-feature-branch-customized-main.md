@@ -80,6 +80,8 @@ cd server && go build -o ./bin/server ./cmd/server
 pm2 restart multica-backend
 ```
 
+> **Self-host note:** on a Homebrew-pg self-host pm2's process table is empty, so `pm2 restart multica-backend` fails. Restart the bare process instead: `lsof -ti:8081 | xargs kill -9` then run `./server/bin/server` (or `set -a; source .env; set +a; go run -C server ./cmd/server`). See `docs/solutions/workflow-issues/self-host-service-start-without-docker.md`.
+
 ### Step 3: Check migration status
 
 ```bash

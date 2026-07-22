@@ -106,8 +106,11 @@ cd /path/to/multica
 git fetch origin
 git merge origin/main
 pnpm install
-pm2 restart multica-frontend
+# restart the frontend — pm2 manages nothing on a Homebrew-pg self-host, so run the bare process
+pnpm -C apps/web exec next start -p "${FRONTEND_PORT:-3001}"
 ```
+
+> **Self-host note:** `make dev` and `pm2 restart` are not usable on a Homebrew-pg self-host (`make dev` is Docker-gated; pm2's process table is empty). The `pnpm install` step this doc is about still applies verbatim; only the restart differs. Full bare-process runbook: `docs/solutions/workflow-issues/self-host-service-start-without-docker.md`.
 
 ## Related
 
