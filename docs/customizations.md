@@ -72,7 +72,7 @@ These will never auto-resolve. Keep them as non-invasive as possible; prefer new
 
 | Feature | PR | Status | Key upstream files | Action on next merge |
 | --- | --- | --- | --- | --- |
-| Runtime build provenance (official baseline in Help menu) | [#5539](https://github.com/multica-ai/multica/pull/5539) | **CLOSED 2026-07-16** | Own file `server/cmd/server/provenance_baseline.go` (zero conflict); `router.go` reduced to a single `ServerVersion:` field line (refactor `8aa05cfb2`); plus `api/client.ts` (2-line) + `help-launcher.tsx` | Own forever. Low-medium invasiveness: logic lives in a dedicated file, only 3 upstream files touched, hottest is `router.go` now down to one line. Recently rejected — confirm intent to keep maintaining locally. |
+| Runtime build provenance (official baseline in Help menu) | [#5539](https://github.com/multica-ai/multica/pull/5539) | **CLOSED 2026-07-16** | Own file `server/cmd/server/provenance_baseline.go` (zero conflict); `router.go` reduced to a single `ServerVersion:` field line (refactor `8aa05cfb2`); plus `api/client.ts` (2-line) + `help-launcher.tsx` | Own forever. Low-medium invasiveness: logic lives in a dedicated file, only 3 upstream files touched, hottest is `router.go` now down to one line. Recently rejected — confirm intent to keep maintaining locally. **Upgrade gotcha:** `main.version` defaults to `"dev"`; `officialBaseline` maps dev/describe-suffix → `""`, so a backend started without `-ldflags "-X main.version=<clean-tag>"` shows "version unavailable" in Help. Re-stamp on every upgrade (frontend `.env NEXT_PUBLIC_APP_VERSION` too). See memory `project-version-stamp-on-upgrade`. |
 
 ### Withdrawn — no local footprint (historical)
 
