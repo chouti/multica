@@ -228,6 +228,8 @@ curl -s -o /dev/null -w "%{http_code}" http://localhost:8081  # backend API
 
 Both endpoints should return 200 (or 301/302 for frontend routing). If either fails, check pm2 logs for the specific process.
 
+> **Self-host caveat (no Docker, pm2 empty).** On a Homebrew-pg self-host like the one this fork runs on, `pm2 restart` fails (pm2's process table is empty — services run as bare processes, not under pm2) and `make start`/`make test` are Docker-gated and unusable. Restart instead by killing the ports and re-running the bare processes: `make stop` then `set -a; source .env; set +a; go run -C server ./cmd/server &` + `pnpm -C apps/web exec next start -p "${FRONTEND_PORT:-3001}" &`. Full runbook (start/stop/migrate/backup/test substitutions): `docs/solutions/workflow-issues/self-host-service-start-without-docker.md`.
+
 ### Step 9: Restore uncommitted modifications
 
 ```bash
