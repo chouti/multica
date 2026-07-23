@@ -9,6 +9,7 @@ import {
   userListOptions,
   workspaceListOptions,
   invitationListOptions,
+  useUpdateUserName,
   useAdminCreateInvitations,
   useAdminAddUserToWorkspaces,
   useAdminRemoveUserFromWorkspace,
@@ -84,6 +85,7 @@ function UserRow({
   onOpenEdit: (user: AdminUser) => void;
 }) {
   const { t } = useT("admin");
+  const updateUser = useUpdateUserName();
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(user.name);
   const [saving, setSaving] = useState(false);
@@ -98,11 +100,7 @@ function UserRow({
     setSaving(true);
     setError("");
     try {
-      await fetch(`/api/admin/users/${user.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: trimmed }),
-      });
+      await updateUser.mutateAsync({ userId: user.id, name: trimmed });
       setEditing(false);
       toast.success(t(($) => $.rename_success));
     } catch {
