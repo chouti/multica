@@ -9,7 +9,11 @@ export function useUpdateUserName() {
     mutationFn: ({ userId, name }: { userId: string; name: string }) =>
       api.adminUpdateUser(userId, name),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: adminKeys.users() });
+      // Invalidate by prefix: adminKeys.users() embeds {search:undefined,...},
+      // which partialMatchKey rejects vs the live query's {search:'',...}
+      // (typeof mismatch), so the users list would never refresh. The prefix
+      // hits every admin users query regardless of its search/limit/offset.
+      qc.invalidateQueries({ queryKey: ["admin", "users"] });
     },
   });
 }
@@ -24,7 +28,11 @@ export function useAdminCreateInvitations() {
       workspaces: string[];
     }) => api.adminCreateInvitations(data),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: adminKeys.users() });
+      // Invalidate by prefix: adminKeys.users() embeds {search:undefined,...},
+      // which partialMatchKey rejects vs the live query's {search:'',...}
+      // (typeof mismatch), so the users list would never refresh. The prefix
+      // hits every admin users query regardless of its search/limit/offset.
+      qc.invalidateQueries({ queryKey: ["admin", "users"] });
     },
   });
 }
@@ -42,7 +50,11 @@ export function useAdminAddUserToWorkspaces() {
       role?: MemberRole;
     }) => api.adminAddUserToWorkspaces(userId, workspaceIds, role),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: adminKeys.users() });
+      // Invalidate by prefix: adminKeys.users() embeds {search:undefined,...},
+      // which partialMatchKey rejects vs the live query's {search:'',...}
+      // (typeof mismatch), so the users list would never refresh. The prefix
+      // hits every admin users query regardless of its search/limit/offset.
+      qc.invalidateQueries({ queryKey: ["admin", "users"] });
     },
   });
 }
@@ -58,7 +70,11 @@ export function useAdminRemoveUserFromWorkspace() {
       workspaceId: string;
     }) => api.adminRemoveUserFromWorkspace(userId, workspaceId),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: adminKeys.users() });
+      // Invalidate by prefix: adminKeys.users() embeds {search:undefined,...},
+      // which partialMatchKey rejects vs the live query's {search:'',...}
+      // (typeof mismatch), so the users list would never refresh. The prefix
+      // hits every admin users query regardless of its search/limit/offset.
+      qc.invalidateQueries({ queryKey: ["admin", "users"] });
     },
   });
 }
@@ -76,7 +92,11 @@ export function useAdminUpdateUserRole() {
       role: MemberRole;
     }) => api.adminUpdateUserRole(userId, workspaceId, role),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: adminKeys.users() });
+      // Invalidate by prefix: adminKeys.users() embeds {search:undefined,...},
+      // which partialMatchKey rejects vs the live query's {search:'',...}
+      // (typeof mismatch), so the users list would never refresh. The prefix
+      // hits every admin users query regardless of its search/limit/offset.
+      qc.invalidateQueries({ queryKey: ["admin", "users"] });
     },
   });
 }
