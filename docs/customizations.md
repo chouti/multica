@@ -121,15 +121,13 @@ git diff <tag>..HEAD -- <path>   # expect only deliberate deltas, not redundant 
 - **Rejected features compound silently.** #5539 was closed by upstream (2026-07-16) yet its code still lives in your leading commits — a rejected feature you forget about still drifts and still costs merge time. Track upstream rejections here the moment they happen. (Contrast #5466: self-withdrawn and fully reverted, so it carries **no** local footprint — see the Withdrawn table.)
 - **The `'project'` token in `MENTION_MARKUP_SOURCE` is NOT a #5466 revival.** `a75305c27` (skill-mention cluster) added `'project'` to the markup-source enum purely for backend parity/completeness — there is no `@project` UI and no typed-mention code behind it. A future reviewer grepping `'project'` may misread it as #5466 (withdrawn @project typed mention) coming back. It is not; do not "clean it up" by removing it.
 
-## Last upgrade — v0.4.3 → v0.4.6 (EXECUTED 2026-07-21)
+## Last upgrade — v0.4.6 → v0.4.8 (EXECUTED 2026-07-23)
 
-✅ **EXECUTED 2026-07-21** — merge `36dbc22ba`, base now `v0.4.6-145-g36dbc22ba`. Verification green: typecheck / go build / pnpm test (2887) / pnpm build. Frontend `/` → 200, backend `/healthz` → 200. DB backed up at `~/multica-backups/v0.4.6-pre-migrate-*.dump`. `make test`/`make start` skipped (need Docker, unavailable on this Homebrew-pg self-host). Post-execution fix (eval-found): `TestMigrationNumericPrefixesStayUniqueAfterLegacySet` was failing on 158/159/160 (lint map missed them); fixed `384e5de0a`.
+✅ **EXECUTED 2026-07-23** — merge `d6da47519`, base now `v0.4.8`. Real merge-base `58162ed2e` (v0.4.6-9, **25** commits — not `v0.4.6..v0.4.8`'s 34; mention cluster + qwen runtime already in base via prior main merge). 5 conflicts resolved (client.ts import / app-sidebar / provider-logo / skill.go #2669 signature adapt / skill_test). Verify green: typecheck (6) / go build / pnpm test (2927) / pnpm build. Backend `/healthz` 200 (`server_version` v0.4.8), frontend `/` 200, public `multica.aicake.com` 302. DB migrated 206-211, backed up `~/multica-backups/v0.4.8-pre-migrate-20260723-105951.dump`. `make test`/`make start` skipped (no Docker). Two install.sh defects hit during reload (doesn't source .env → stamp v0.4.6; `launchctl bootstrap` doesn't restart running process) → brief prod downs, recovered via manual `launchctl bootstrap+start`. See `project-install-sh-reload-defects` memory.
 
-The full per-file strategy table, negative-claim verification, and Phase-by-Phase record for **this** upgrade live in its process artifact:
+The full per-file strategy, verified negative claims, and Phase-by-Phase record:
 
-→ **`docs/upgrades/v0.4.6-plan.md`** (frontmatter `upgrade_contract: selfhost-upgrade/v1`, `phase: done`)
-
-Every future upgrade gets its own `docs/upgrades/<tag>-plan.md`; the per-upgrade process lives there, not in this ledger.
+→ **`docs/upgrades/v0.4.8-plan.md`** (frontmatter `upgrade_contract: selfhost-upgrade/v1`, `phase: done`)
 
 ## Related
 
