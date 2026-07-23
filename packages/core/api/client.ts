@@ -48,6 +48,7 @@ import type {
   UpdateSkillRequest,
   SetAgentSkillsRequest,
   BatchImportResponse,
+  SetAgentRuntimeSkillEnabledRequest,
   PersonalAccessToken,
   CreatePersonalAccessTokenRequest,
   CreatePersonalAccessTokenResponse,
@@ -277,7 +278,7 @@ export interface ApiClientIdentity {
   platform?: string;
   /** Client/app version string (e.g. "0.1.0", git tag, commit). */
   version?: string;
-  /** Operating system the client is running on: "macos" | "windows" | "linux". */
+  /** Coarse operating-system bucket (for example "macos", "windows", or "linux"). */
   os?: string;
 }
 
@@ -286,6 +287,19 @@ export interface ApiClientOptions {
   onUnauthorized?: () => void;
   /** Identifies the client to the server. Sent as X-Client-* headers. */
   identity?: ApiClientIdentity;
+}
+
+export interface ClientRuntimeSnapshot {
+  probe_result: "success" | "error";
+  runtime_count?: number;
+  provider_summary?: Record<string, number>;
+  online_count?: number;
+  offline_count?: number;
+}
+
+export interface ClientUsageRequest {
+  install_id: string;
+  runtime?: ClientRuntimeSnapshot;
 }
 
 export interface LoginResponse {
@@ -753,6 +767,13 @@ export class ApiClient {
     });
     return parseWithFallback(raw, CreateFeedbackResponseSchema, EMPTY_CREATE_FEEDBACK_RESPONSE, {
       endpoint: "POST /api/feedback",
+    });
+  }
+
+  async upsertClientUsage(data: ClientUsageRequest): Promise<void> {
+    await this.fetch("/api/client-usage", {
+      method: "POST",
+      body: JSON.stringify(data),
     });
   }
 
@@ -1902,6 +1923,16 @@ export class ApiClient {
 			body: JSON.stringify({ enabled }),
 		});
 	}
+
+  async setAgentRuntimeSkillEnabled(
+    agentId: string,
+    data: SetAgentRuntimeSkillEnabledRequest,
+  ): Promise<void> {
+    await this.fetch(`/api/agents/${agentId}/runtime-skills/enabled`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+  }
 
 	async removeAgentSkill(agentId: string, skillId: string): Promise<void> {
 		await this.fetch(`/api/agents/${agentId}/skills/${skillId}`, {
