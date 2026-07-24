@@ -131,9 +131,14 @@ export function useCommentTriggerPreview({
   // Dedup by agent id so a designated agent that the backend also picked
   // (e.g. via @agent in the same comment) does not appear twice.
   const designated = skillDesignatedAgents ?? [];
+  const designatedById = new Map(designated.map((a) => [a.id, a]));
   const backendIds = new Set(backendAgents.map((a) => a.id));
+  // When an agent is both an implicit backend trigger and skill-designated,
+  // surface the designation row so the chip reflects that the agent will run
+  // carrying the skill (R5). bind is decoupled from the run, so the preview
+  // must not show a bare implicit chip that hides the user's @skill intent.
   const merged: CommentTriggerPreviewAgent[] = [
-    ...backendAgents,
+    ...backendAgents.map((a) => designatedById.get(a.id) ?? a),
     ...designated.filter((a) => !backendIds.has(a.id)),
   ];
 

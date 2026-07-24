@@ -34,7 +34,7 @@ export function useSkillDesignatedPreviewAgents(
       name: a.name,
       avatar_url: a.avatar_url ?? undefined,
       source: "mention_skill",
-      reason: "Skill mention designation",
+      reason: "Will run with the designated skill",
     });
   }
   return out;
