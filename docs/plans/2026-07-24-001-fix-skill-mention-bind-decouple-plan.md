@@ -103,6 +103,29 @@ YUP-407：用户与活跃 agent「kahneman」对话时 `@ce-plan` + 手势指定
 - OQ1. *(resolved in planning)* trigger-preview 当前行为已厘清：后端 preview handler 不 routes on skills（`comment.go:1164-1229`，parse 后 intentionally discarded），显示完全由前端 `use-skill-designated-preview-agents.ts` 单独构造。R5 改法确定为纯前端（KTD3）。
 - OQ2. *(resolved in planning)* callout 注入点确定为 `writeSkills`，但其跨层数据流成本导致 R6 defer（见 Scope Boundaries）。
 
+### Pre-existing Test Failures (Residual)
+
+本 plan 范围内的 Go handler 测试**全部 green**（U1 的两个反转/新增用例 + 其余 skill-mention 测试）。但全量 `go test ./internal/handler/` 在 self-host 上报 **7 个预存 fail**，**与本次 finding #4 修复无关**：
+
+```
+TestAutopilotDelegationAuthority_LineageBinding
+TestClaimTask_ManualRetryReusesWorkdir
+TestCreateComment_AutopilotLeaderMentionEnqueuesPrivateWorker
+TestCreateComment_AutopilotWorkerResultWakesSquadLeader
+TestEnqueueSkillMention_NoDesignationIgnoresAssignee
+TestReconcileCommentsOnCompletion_AutopilotDelegationRestoresAuthority
+TestUpdateComment_AutopilotAuthorityReStampedToEditingTask
+```
+
+**已排查的结论（2026-07-24）：**
+
+- **不是 v0.4.9 回归**：在 v0.4.8 worktree（`/tmp/multica-v048`，已清理）跑同一组测试，**fail 列表完全一致**——这 7 个 fail 在 v0.4.8 时代就存在。
+- **不是 merge 冲突解决错误**：v0.4.9 范围内的两个 commit（`6992c58de` Codex Fast mode、`fcb370edf` squads parent status）单独跑也都 PASS；只有当 fast-forward 到 bc2cd0d0a（merge commit）才出现完整 fail 列表——但 v0.4.8 自身已含此 fail 集合。
+- **不是迁移未跑**：`schema_migrations` 同时含 4 个 159/160 条目（`159_backfill_direct_assignment_comment_source_task_id` + `159_chat_message_message_kind` 等），test DB（`:5432`）的迁移是完整的。
+- **最可能的真因**：测试 fixture（`newAutopilotDelegationFixture` 等）假设 self-host 生产 DB（`:5433`）"已有 autopilot + agent + task + 历史评论"的 seed 数据；fresh migrate 的测试 DB（`:5432`）满足 schema 但没有这种"生产-like history"。失败的链路集中在 `autopilotDelegationAuthority`（`server/internal/handler/agent_access.go:245`）——lineage 验证走 `comment.source_task_id` 查 task，但 fixture 评论没 stamp 该字段。
+
+**接手建议**（不在本 plan scope）：要么在 `internal/handler/handler_test.go` 的 `TestMain` 加 autopilot/agent/task seed hook（让 fresh DB 也能跑），要么把 fixture 改成 self-contained（不依赖外部 seed）。前者工作量小，但需谨慎——autopilot authority 是 security-critical（MUL-4857 "confused-deputy defense"），seed hook 不能让 authority 误授权。
+
 ### Sources & Research
 
 - 代码：`server/internal/handler/comment.go:1491-1529`（triggerTasksForComment，bind 在 filterSuppressed 之前）、`:1536-1544`（dedupeTriggersByAgent）、`:1576-1689`（bindAndEnqueueSkillMentions，含 canInvokeAgent gate）、`:1698-1740`（bindDesignatedSkillsForTriggers，`:1718` 的 `source != mention_skill` 过滤即 finding #4）、`:1009-1018`（CommentTriggerPreviewRequest，read-only）、`:1164-1229`（preview handler）；`server/internal/handler/handler.go:467-493`（parseSkillMentionAgents）；`server/internal/handler/skill_mention_trigger_test.go:820-873`；`server/internal/daemon/execenv/runtime_config_sections.go:466-486`（writeSkills）；`packages/views/issues/hooks/use-skill-designated-preview-agents.ts`（前端 preview 构造）。
