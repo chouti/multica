@@ -49,6 +49,8 @@ The act of copying a skill from a runtime into a workspace. Imports can be singl
 ### Skill Mention Gesture
 The explicit "pick an agent" action attached to a `@skill` mention chip in the comment composer. A `@skill` chip is inert until the gesture designates an available agent; designating one and submitting durably binds the skill to that agent (when not already bound) and enqueues the agent to run with the skill's full bundle. A chip with no designated agent reverts to plain text and never triggers on its own. This replaces the earlier binding-table reverse-lookup routing (`resolveSkillMentionTrigger`).
 
+**Bind and run are decoupled.** The durable `agent_skill` row created by designating is independent of which trigger path (the explicit `@skill` mention or an implicit reply-parent / assignee / conversation-continuation) ends up enqueuing the task. Even if the comment's R5 trigger dedup keeps the agent's implicit trigger and drops the skill duplicate, the designated agent is still bound to the skill — the bind pass keys off the designated-agent map, not off the surviving trigger's source. Conversely, suppressing the agent this turn stops the run but does not undo the bind; the durable row persists for future runs. See `docs/solutions/logic-errors/bind-on-skip-when-dedup-rewrites-source.md` for the failure mode that motivated this invariant.
+
 ---
 
 ## Agent Access
