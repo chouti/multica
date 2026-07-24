@@ -817,7 +817,7 @@ func TestEnqueueSkillMention_MultipleSkillsDesignatedToSameAgentAllBound(t *test
 // implicit path + @skill designating the same agent -> agent runs (via
 // implicit) and the agent_skill row is NEVER created (the dedup removed
 // the skill trigger before bind).
-func TestEnqueueSkillMention_ImplicitAndDesignatedSameAgent_NoBindWithoutRun(t *testing.T) {
+func TestEnqueueSkillMention_ImplicitAndDesignatedSameAgent_BindsDespiteDedup(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
 	}
@@ -864,11 +864,51 @@ func TestEnqueueSkillMention_ImplicitAndDesignatedSameAgent_NoBindWithoutRun(t *
 	if got := countQueuedOrDispatched(t, fx.OtherAgentID, fx.IssueID); got != 1 {
 		t.Fatalf("expected exactly 1 task on other (dedup kept reply-parent), got %d", got)
 	}
-	// Bind-without-run contract: the dedup removed the skill trigger before
-	// bind, so the agent_skill row must NOT be created. Other agent is
-	// unbound to skillA throughout.
+	// Bind-run decoupling contract: dedup kept the implicit trigger and
+	// dropped the skill duplicate, but the designated agent is STILL bound
+	// to the skill — bind is independent of which trigger source won dedup
+	// (R1/R3: bind does not depend on the run).
+	if got := countAgentSkillBindingsFor(t, fx.OtherAgentID, fx.SkillID); got != 1 {
+		t.Fatalf("expected designated agent bound to skillA despite implicit dedup, got %d bindings", got)
+	}
+}
+
+// TestEnqueueSkillMention_SuppressedDesignatedAgentStillBound covers R3:
+// suppressing a designated agent stops its run this turn but must not undo
+// the durable bind — bind is decoupled from the run.
+func TestEnqueueSkillMention_SuppressedDesignatedAgentStillBound(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	fx := newSkillMentionFixture(t)
+
 	if got := countAgentSkillBindingsFor(t, fx.OtherAgentID, fx.SkillID); got != 0 {
-		t.Fatalf("bind-without-run weapon still active: other has %d agent_skill rows for skillA, want 0", got)
+		t.Fatalf("precondition: other should be unbound to skillA, got %d", got)
+	}
+
+	content := "[@SkillA](mention://skill/" + fx.SkillID + ") please review"
+	commentID := insertSkillMentionComment(t, fx.IssueID, content)
+	issue, err := testHandler.Queries.GetIssue(ctx, parseUUID(fx.IssueID))
+	if err != nil {
+		t.Fatalf("load issue: %v", err)
+	}
+	comment, err := testHandler.Queries.GetComment(ctx, parseUUID(commentID))
+	if err != nil {
+		t.Fatalf("load comment: %v", err)
+	}
+
+	suppress := []pgtype.UUID{parseUUIDForTest(t, fx.OtherAgentID)}
+	_ = testHandler.triggerTasksForComment(ctx, issue, comment, nil, "member", testUserID, "", suppress, map[string][]pgtype.UUID{
+		fx.SkillID: {parseUUIDForTest(t, fx.OtherAgentID)},
+	})
+
+	// R3: suppress only stops the run this turn; it must not undo the bind.
+	if got := countQueuedOrDispatched(t, fx.OtherAgentID, fx.IssueID); got != 0 {
+		t.Fatalf("expected 0 tasks for suppressed agent, got %d", got)
+	}
+	if got := countAgentSkillBindingsFor(t, fx.OtherAgentID, fx.SkillID); got != 1 {
+		t.Fatalf("expected designated agent bound despite suppress (R3), got %d bindings", got)
 	}
 }
 

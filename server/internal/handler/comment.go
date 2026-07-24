@@ -1510,16 +1510,18 @@ func (h *Handler) triggerTasksForComment(ctx context.Context, issue db.Issue, co
 	// on the unique-index "double-enqueue + swallowed error" dance that
 	// previously masked this contract.
 	//
-	// IMPORTANT: the dedup must happen BEFORE any durable agent_skill
-	// bind for the same agent. A designee that the implicit path already
-	// picked gets deduped out and therefore must NOT be bound — that
-	// would be the "bind-without-run weapon" (review finding #4).
+	// The dedup runs before bind only because it settles the enqueue set;
+	// bind itself is source-agnostic (see bindDesignatedSkillsForTriggers).
+	// A designee the implicit path already picked is kept by dedup under
+	// its implicit Source and is STILL bound — bind is a durable user
+	// intent decoupled from which trigger source runs the agent (reverses
+	// the former "bind-without-run weapon" / review finding #4).
 	triggers = dedupeTriggersByAgent(triggers)
-	// Post-dedup bind: now that the final trigger set is settled, bind
-	// each designated agent to its skill(s). Only agents in the deduped
-	// slice will be enqueued (filterSuppressed runs next), so binding
-	// here is safe. Agents the dedup removed (because an implicit path
-	// already selected them) are NOT bound.
+	// Post-dedup bind: bind each designated agent to its skill(s), keyed by
+	// agent id in skillBindings (not by trigger source). An agent kept by
+	// dedup under its implicit Source is still bound when it also holds a
+	// designation. filterSuppressed runs next and only controls whether the
+	// agent runs this turn; it does not undo the durable bind (R3).
 	if len(skillBindings) > 0 {
 		h.bindDesignatedSkillsForTriggers(ctx, triggers, skillBindings, issue)
 	}
@@ -1696,11 +1698,16 @@ func (h *Handler) bindAndEnqueueSkillMentions(ctx context.Context, issue db.Issu
 type skillBindingsMap = map[string][]pgtype.UUID
 
 // bindDesignatedSkillsForTriggers upserts the agent_skill rows for every
-// trigger in the slice whose source is mention_skill, using the
-// corresponding skill ids in skillBindings. Runs AFTER the outer R5
-// dedup, so a designee the implicit path already selected (and therefore
-// deduped out) is never bound, eliminating the "bind-without-run weapon"
-// (review finding #4). Multiple skills per agent are all bound.
+// trigger whose agent appears in skillBindings, keyed by agent id (not by
+// trigger source). Bind is decoupled from the run: an agent the implicit
+// path already selected (and which R5 dedup therefore kept in place of the
+// skill duplicate) is still bound, because a @skill designation is a durable
+// user intent that must reach the agent's bundle regardless of which trigger
+// source won the dedup (CONCEPTS.md "Skill Mention Gesture"). This reverses
+// the former "bind-without-run weapon" guard (review finding #4), which
+// filtered on source and so skipped bind for exactly the agent dedup had
+// rewritten to implicit — the YUP-407 silent failure. Multiple skills per
+// agent are all bound.
 //
 // Uses a single SQL upsert (UpsertAgentSkillEnabled, INSERT ... ON CONFLICT
 // DO UPDATE SET enabled=TRUE) that converges on enabled=TRUE regardless of
@@ -1715,9 +1722,6 @@ type skillBindingsMap = map[string][]pgtype.UUID
 // side-effect for future runs and the next comment retries it.
 func (h *Handler) bindDesignatedSkillsForTriggers(ctx context.Context, triggers []commentAgentTrigger, skillBindings skillBindingsMap, issue db.Issue) {
 	for _, t := range triggers {
-		if t.Source != commentTriggerSourceMentionSkill {
-			continue
-		}
 		agentKey := uuidToString(t.Agent.ID)
 		skills, ok := skillBindings[agentKey]
 		if !ok {
