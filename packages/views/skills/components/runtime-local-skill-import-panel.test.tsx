@@ -60,6 +60,20 @@ vi.mock("sonner", () => ({
   },
 }));
 
+vi.mock("motion/react", () => ({
+  AnimatePresence: ({ children }: { children: ReactNode }) => children,
+  motion: {
+    div: ({
+      children,
+      className,
+    }: {
+      children: ReactNode;
+      className?: string;
+    }) => <div className={className}>{children}</div>,
+  },
+  useReducedMotion: () => true,
+}));
+
 import { RuntimeLocalSkillImportPanel } from "./runtime-local-skill-import-panel";
 
 function I18nWrapper({ children }: { children: ReactNode }) {
