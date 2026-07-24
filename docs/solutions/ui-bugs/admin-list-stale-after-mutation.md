@@ -108,8 +108,9 @@ unaffected — it invalidates `adminKeys.invitations()`, which is already a pref
 ## Why This Works
 
 `invalidateQueries` defaults to `exact: false`, which matches queries via
-`partialMatchKey`. In `@tanstack/query-core@5.96.2`
-(`src/utils.ts`, `partialMatchKey`):
+`partialMatchKey`. In `@tanstack/query-core` v5.96.2 (pinned in `pnpm-lock.yaml`;
+source under `node_modules/.pnpm/@tanstack+query-core@5.96.2/`), `src/utils.ts`
+`partialMatchKey`:
 
 ```ts
 export function partialMatchKey(a: any, b: any): boolean {
@@ -183,7 +184,8 @@ at the call site but match very differently under `partialMatchKey`.
 
 - Plan: `docs/plans/2026-07-23-001-fix-admin-user-rename-plan.md`
 - Fix commit: `ee6d1e031` — `fix(admin): invalidate users list by prefix so admin
-  mutations refresh it`
+  mutations refresh it` (local commit on this self-host fork; not pushed to
+  origin, so the SHA is local-only and won't resolve on other checkouts)
 - Surfaced by: `ce-code-review` correctness reviewer (the rename fix activated
   the previously-dead `useUpdateUserName`, making the latent no-op visible).
   Confirmed by reading `@tanstack/query-core@5.96.2` `src/utils.ts`
