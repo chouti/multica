@@ -1,7 +1,7 @@
 ---
 title: "Local customization ledger — tracking divergent commits and upstream PR status"
 date: 2026-07-17
-last_updated: 2026-07-21
+last_updated: 2026-07-24
 category: "workflow-issues"
 module: "git"
 problem_type: "workflow_issue"
@@ -121,13 +121,13 @@ git diff <tag>..HEAD -- <path>   # expect only deliberate deltas, not redundant 
 - **Rejected features compound silently.** #5539 was closed by upstream (2026-07-16) yet its code still lives in your leading commits — a rejected feature you forget about still drifts and still costs merge time. Track upstream rejections here the moment they happen. (Contrast #5466: self-withdrawn and fully reverted, so it carries **no** local footprint — see the Withdrawn table.)
 - **The `'project'` token in `MENTION_MARKUP_SOURCE` is NOT a #5466 revival.** `a75305c27` (skill-mention cluster) added `'project'` to the markup-source enum purely for backend parity/completeness — there is no `@project` UI and no typed-mention code behind it. A future reviewer grepping `'project'` may misread it as #5466 (withdrawn @project typed mention) coming back. It is not; do not "clean it up" by removing it.
 
-## Last upgrade — v0.4.6 → v0.4.8 (EXECUTED 2026-07-23)
+## Last upgrade — v0.4.8 → v0.4.9 (EXECUTED 2026-07-24)
 
-✅ **EXECUTED 2026-07-23** — merge `d6da47519`, base now `v0.4.8`. Real merge-base `58162ed2e` (v0.4.6-9, **25** commits — not `v0.4.6..v0.4.8`'s 34; mention cluster + qwen runtime already in base via prior main merge). 5 conflicts resolved (client.ts import / app-sidebar / provider-logo / skill.go #2669 signature adapt / skill_test). Verify green: typecheck (6) / go build / pnpm test (2927) / pnpm build. Backend `/healthz` 200 (`server_version` v0.4.8), frontend `/` 200, public `multica.aicake.com` 302. DB migrated 206-211, backed up `~/multica-backups/v0.4.8-pre-migrate-20260723-105951.dump`. `make test`/`make start` skipped (no Docker). Two install.sh defects hit during reload (doesn't source .env → stamp v0.4.6; `launchctl bootstrap` doesn't restart running process) → brief prod downs, recovered via manual `launchctl bootstrap+start`. See `project-install-sh-reload-defects` memory.
+✅ **EXECUTED 2026-07-24** — merge `bc2cd0d0a`, base now `v0.4.9`. Clean merge-base `f6902a5f5` (= v0.4.8), 32 commits. **0 conflict** (merge-tree preview + actual merge both confirm; 25 intersection files all auto-merge clean). 1 semantic fix: `table-view-editing.test.tsx` — fork's v0.4.8 manual backport of dd45f3055 (passed `<Harness issues={...}/>`) clashed with upstream's official dd45f3055 (component dropped the `issues` prop) → took upstream v0.4.9 version. Verify green: typecheck (6/6) / go build / pnpm test (2982) / pnpm build (3/3). Backend `/healthz` 200 (`server_version` v0.4.9), frontend `/` 200. DB migrated 203/204/205/212, backed up `~/multica-backups/v0.4.9-pre-migrate-20260724-091956.dump` (34M). install.sh two defects avoided this round (manual `export`+`-ldflags`+`build-frontend.sh`+`launchctl kickstart -k`, no prod down). admin rename fix (fork-only admin module) preserved with zero conflict. Note: backend takes ~40s to accept requests after `kickstart` (daemon runtime registration init) — first `/healthz` may return 000 while still starting, not a fault.
 
 The full per-file strategy, verified negative claims, and Phase-by-Phase record:
 
-→ **`docs/upgrades/v0.4.8-plan.md`** (frontmatter `upgrade_contract: selfhost-upgrade/v1`, `phase: done`)
+→ **`docs/upgrades/v0.4.9-plan.md`** (frontmatter `upgrade_contract: selfhost-upgrade/v1`, `phase: done`)
 
 ## Related
 
