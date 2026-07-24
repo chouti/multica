@@ -32,6 +32,11 @@ interface ConfigState {
   // must be hidden. Defaults to false so unknown / older servers behave like
   // the managed-cloud case.
   workspaceCreationDisabled: boolean;
+  // Self-host-only gate for the Git provider integration (Forgejo / Gitea /
+  // GitLab). When false the whole Settings → Integrations "Git providers"
+  // section is hidden. Defaults to false so unknown / older servers and the
+  // managed cloud (which omits the field) keep it hidden.
+  vcsIntegrationAvailable: boolean;
   featureFlags: Record<string, boolean>;
   // Official release baseline of the loaded frontend bundle (clean vX.Y.Z tag
   // compiled in at build time), or "" when the bundle was not stamped with a
@@ -48,6 +53,7 @@ interface ConfigState {
     allowSignup: boolean;
     googleClientId?: string;
     workspaceCreationDisabled?: boolean;
+    vcsIntegrationAvailable?: boolean;
   }) => void;
   setDaemonConfig: (config: {
     daemonServerUrl?: string;
@@ -66,13 +72,18 @@ export const configStore = createStore<ConfigState>((set) => ({
   daemonServerUrl: "",
   daemonAppUrl: "",
   workspaceCreationDisabled: false,
+  vcsIntegrationAvailable: false,
   featureFlags: {},
   frontendBaseline: "",
   backendBaseline: "",
   backendBaselineStatus: "loading",
   setCdnConfig: ({ cdnDomain, cdnSigned = false }) => set({ cdnDomain, cdnSigned }),
-  setAuthConfig: ({ allowSignup, googleClientId = "", workspaceCreationDisabled = false }) =>
-    set({ allowSignup, googleClientId, workspaceCreationDisabled }),
+  setAuthConfig: ({
+    allowSignup,
+    googleClientId = "",
+    workspaceCreationDisabled = false,
+    vcsIntegrationAvailable = false,
+  }) => set({ allowSignup, googleClientId, workspaceCreationDisabled, vcsIntegrationAvailable }),
   setDaemonConfig: ({ daemonServerUrl = "", daemonAppUrl = "" }) =>
     set({ daemonServerUrl, daemonAppUrl }),
   setFeatureFlags: (flags = {}) => set({ featureFlags: { ...flags } }),
