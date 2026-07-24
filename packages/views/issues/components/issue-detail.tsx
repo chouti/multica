@@ -2474,9 +2474,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                   <div className="inline-flex items-center gap-1.5 rounded-full bg-muted/60 px-2 py-0.5">
                     <ProgressRing done={doneCount} total={childIssues.length} size={11} />
                     <span className="text-[11px] text-muted-foreground tabular-nums font-medium">
-                      {archivedCount > 0
-                        ? `${doneCount}/${childIssues.length} done · ${archivedCount} archived`
-                        : `${doneCount}/${childIssues.length}`}
+                      {formatProgressText({ done: doneCount, total: childIssues.length, archived: archivedCount })}
                     </span>
                   </div>
                   <input
