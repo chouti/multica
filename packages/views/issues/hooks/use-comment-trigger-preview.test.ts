@@ -254,6 +254,42 @@ describe("useCommentTriggerPreview", () => {
     expect(result.current).toEqual({ agents: [], blocked: [] });
     expect(previewCommentTriggers).not.toHaveBeenCalled();
   });
+
+  it("surfaces the designation row when an agent is both implicit and skill-designated (R5)", async () => {
+    const sharedId = "00000000-0000-0000-0000-000000000001";
+    const implicitAgent: CommentTriggerPreviewAgent = {
+      id: sharedId,
+      name: "Walt",
+      source: "issue_assignee",
+      reason: "",
+    };
+    const designatedAgent: CommentTriggerPreviewAgent = {
+      id: sharedId,
+      name: "Walt",
+      source: "mention_skill",
+      reason: "Will run with the designated skill",
+    };
+    previewCommentTriggers.mockResolvedValue({ agents: [implicitAgent] });
+
+    const { result } = renderHook(
+      () =>
+        useCommentTriggerPreview({
+          issueId: "issue-1",
+          content: `[@Skill](mention://skill/skill-1)`,
+          skillDesignatedAgents: [designatedAgent],
+        }),
+      { wrapper: createWrapper() },
+    );
+
+    await advancePreviewDebounce();
+    await vi.waitFor(() => {
+      expect(result.current.agents).toHaveLength(1);
+    });
+    // The shared agent appears once (deduped) and surfaces the designation
+    // row, so the chip reflects "will run carrying the skill" rather than a
+    // bare implicit trigger (R5).
+    expect(result.current.agents[0]).toEqual(designatedAgent);
+  });
 });
 
 describe("commentTriggerPreviewSignature", () => {
