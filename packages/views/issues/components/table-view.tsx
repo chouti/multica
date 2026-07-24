@@ -134,7 +134,7 @@ import {
   refreshFrozenTableRows,
   type IssueTableDisplayRow,
 } from "./table-view-model";
-import type { ChildProgress } from "./list-row";
+import { formatProgressText, type ChildProgress } from "./child-progress";
 import { InfiniteScrollSentinel } from "./infinite-scroll-sentinel";
 import { IssueAgentActivityIndicator } from "./issue-agent-activity-indicator";
 
@@ -1156,7 +1156,7 @@ function IssueTableBodyCell({
       return progress ? (
         <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
           <ProgressRing done={progress.done} total={progress.total} size={15} />
-          {progress.done}/{progress.total}
+          {formatProgressText(progress)}
         </span>
       ) : (
         <span className="text-muted-foreground">{t(($) => $.table.empty_value)}</span>
@@ -2207,7 +2207,7 @@ export function TableView({
               return issue[column.key];
             case "child_progress": {
               const progress = exportLookups.childProgressMap.get(issue.id);
-              return progress ? `${progress.done}/${progress.total}` : "";
+              return progress ? formatProgressText(progress) : "";
             }
             case "creator":
               return exportActorName(issue.creator_type, issue.creator_id);
