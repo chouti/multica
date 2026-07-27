@@ -16,6 +16,17 @@ REPO="$(cd "$SELF_DIR/../.." && pwd)"
 MULTICA_HOME="${HOME}/.multica"
 LAUNCH_AGENTS="${HOME}/Library/LaunchAgents"
 UID_NUM="$(id -u)"
+
+# Source the repo .env so NEXT_PUBLIC_APP_VERSION (and friends) reflect the
+# checked-out release instead of falling back to the stale default below.
+# Without this a bare `install.sh` stamps the backend with the hard-coded
+# fallback and the Help menu silently reports the wrong version.
+if [ -f "$REPO/.env" ]; then
+  set -a
+  # shellcheck disable=SC1091
+  . "$REPO/.env"
+  set +a
+fi
 VERSION="${NEXT_PUBLIC_APP_VERSION:-v0.4.6}"
 
 echo "==> Preparing $MULTICA_HOME ..."
@@ -38,15 +49,28 @@ echo "==> Installing + loading launchd plists ..."
 mkdir -p "$LAUNCH_AGENTS"
 for label in frontend backend; do
   job="gui/$UID_NUM/com.fengzhao.multica-${label}"
+  domain="gui/$UID_NUM"
   plist="com.fengzhao.multica-${label}.plist"
   # Bootout first if a previous version is loaded (idempotent reload).
   if launchctl print "$job" >/dev/null 2>&1; then
-    launchctl bootout "$job" "$LAUNCH_AGENTS/$plist" 2>/dev/null || \
-      launchctl bootout "$job" 2>/dev/null || true
+    launchctl bootout "$job" 2>/dev/null || true
+    for _ in 1 2 3 4 5; do
+      launchctl print "$job" >/dev/null 2>&1 || break
+      sleep 1
+    done
   fi
   cp "$SELF_DIR/$plist" "$LAUNCH_AGENTS/$plist"
-  launchctl bootstrap "$job" "$LAUNCH_AGENTS/$plist" || \
-    launchctl load "$LAUNCH_AGENTS/$plist"  # older fallback
+  for attempt in 1 2 3; do
+    if launchctl bootstrap "$domain" "$LAUNCH_AGENTS/$plist" 2>/dev/null || \
+      launchctl load "$LAUNCH_AGENTS/$plist" 2>/dev/null; then
+      launchctl print "$job" >/dev/null 2>&1 && break
+    fi
+    if [ "$attempt" = "3" ]; then
+      echo "ERROR: failed to load com.fengzhao.multica-${label}" >&2
+      exit 1
+    fi
+    sleep 1
+  done
   echo "    loaded com.fengzhao.multica-${label}"
 done
 
