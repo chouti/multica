@@ -134,6 +134,36 @@ multica setup          # Connect to Multica Cloud, log in, start daemon
 
 </details>
 
+</details>
+
+<details>
+<summary><b>Windows (PowerShell)</b></summary>
+
+<br/>
+
+### PowerShell
+
+```powershell
+irm https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.ps1 | iex
+```
+
+Then configure, authenticate, and start the daemon in one command:
+
+```powershell
+multica setup          # Connect to Multica Cloud, log in, start daemon
+```
+
+> **Self-hosting?** Set the `MULTICA_MODE` environment variable to `with-server` before running the installer to deploy a full Multica server on your machine:
+>
+> ```powershell
+> $env:MULTICA_MODE="with-server"; irm https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.ps1 | iex
+> multica setup self-host
+> ```
+>
+> This pulls the official Multica images from GHCR (latest stable by default). Requires Docker. See the [Self-Hosting Guide](SELF_HOSTING.md) for details.
+
+</details>
+
 ---
 
 ## Getting Started

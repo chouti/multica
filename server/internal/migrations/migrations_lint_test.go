@@ -49,6 +49,8 @@ var legacyDuplicateMigrationStems = map[string][]string{
 	"158": {"158_agent_task_queue_chat_input_task_id", "158_backfill_comment_source_task_id"},
 	"159": {"159_backfill_direct_assignment_comment_source_task_id", "159_chat_message_message_kind"},
 	"160": {"160_backfill_during_execution_comment_source_task_id", "160_chat_message_input_owner_index"},
+	"213": {"213_issue_status_archived", "213_task_usage_authoritative_cost"},
+	"214": {"214_chat_session_project", "214_issue_status_classifier_functions"},
 }
 
 var migrationPrefixPattern = regexp.MustCompile(`^(\d+)_`)
