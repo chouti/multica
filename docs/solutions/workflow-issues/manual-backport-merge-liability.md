@@ -107,6 +107,7 @@ merge tool does not verify type or runtime contracts; only typecheck/tests do.
 
 ## Related
 
+- `docs/solutions/workflow-issues/rerere-stale-auto-resolution-upgrade-merge.md` — sibling at the conflict-resolution layer: rerere replays a stale recorded resolution as *text* (re-adds config upstream removed), where this doc is the type-contract/auto-merge layer. Same "tool says clean, semantics say wrong" shape; the rerere case escapes even the typecheck safety net.
 - `docs/upgrades/v0.4.9-plan.md` — this upgrade's Phase 4/5 record of the fix
   (negative_claim caveat predicted it; Phase 5 typecheck caught it).
 - `docs/upgrades/v0.4.8-plan.md` — where the hand-backport was originally made

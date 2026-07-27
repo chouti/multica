@@ -81,6 +81,8 @@ git diff --name-only --diff-filter=U | wc -l
 
 Not all conflicts deserve the same resolution approach. Categorize each conflicted file and apply the appropriate strategy.
 
+> **rerere caveat.** If `rerere` is enabled, a conflict may be auto-resolved (staged "using previous resolution") before you ever categorize it — silently bypassing this per-file strategy. A rerere resolution replays the *text* of an older resolution and can be stale (e.g. re-add build args upstream has since removed). Re-verify any rerere-resolved file against upstream's current intent before trusting it. See `docs/solutions/workflow-issues/rerere-stale-auto-resolution-upgrade-merge.md`.
+
 **Strategy A — Accept upstream for refactored APIs.** When upstream refactored a component you also customized, accept their version and adapt your local code afterward. Do not try to manually merge old size tokens with new ones.
 
 ```bash
