@@ -14,7 +14,8 @@ import (
 const childIssueProgress = `-- name: ChildIssueProgress :many
 SELECT parent_issue_id,
        COUNT(*)::bigint AS total,
-       COUNT(*) FILTER (WHERE status IN ('done', 'cancelled'))::bigint AS done
+       COUNT(*) FILTER (WHERE issue_status_is_completed(status))::bigint AS done,
+       COUNT(*) FILTER (WHERE status = 'archived')::bigint AS archived
 FROM issue
 WHERE workspace_id = $1
   AND parent_issue_id IS NOT NULL
@@ -25,6 +26,7 @@ type ChildIssueProgressRow struct {
 	ParentIssueID pgtype.UUID `json:"parent_issue_id"`
 	Total         int64       `json:"total"`
 	Done          int64       `json:"done"`
+	Archived      int64       `json:"archived"`
 }
 
 func (q *Queries) ChildIssueProgress(ctx context.Context, workspaceID pgtype.UUID) ([]ChildIssueProgressRow, error) {
@@ -36,7 +38,12 @@ func (q *Queries) ChildIssueProgress(ctx context.Context, workspaceID pgtype.UUI
 	items := []ChildIssueProgressRow{}
 	for rows.Next() {
 		var i ChildIssueProgressRow
-		if err := rows.Scan(&i.ParentIssueID, &i.Total, &i.Done); err != nil {
+		if err := rows.Scan(
+			&i.ParentIssueID,
+			&i.Total,
+			&i.Done,
+			&i.Archived,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -339,7 +346,13 @@ func (q *Queries) CreateIssueWithOrigin(ctx context.Context, arg CreateIssueWith
 }
 
 const deleteIssue = `-- name: DeleteIssue :exec
-DELETE FROM issue WHERE id = $1 AND workspace_id = $2
+WITH target AS (
+    SELECT issue.id FROM issue WHERE issue.id = $1 AND issue.workspace_id = $2
+),
+cleared_vcs_pr_links AS (
+    DELETE FROM issue_vcs_pull_request WHERE issue_id IN (SELECT target.id FROM target)
+)
+DELETE FROM issue WHERE issue.id IN (SELECT target.id FROM target)
 `
 
 type DeleteIssueParams struct {
@@ -352,6 +365,17 @@ type DeleteIssueParams struct {
 // (loadIssueForUser / GetIssueInWorkspace) already enforce membership today,
 // but a future loader bypass or a new caller skipping the loader would be
 // silently catastrophic without this guard. See incident #1661.
+//
+// issue_vcs_pull_request (migration 213) has no FK to issue, so the link rows
+// are not cascaded away. Sweep them here so they go atomically with the issue.
+// The mirrored PR rows themselves belong to the connection, not the issue, so
+// they persist (matching the GitHub link behaviour).
+//
+// The sweep MUST route through the same workspace-checked target as the issue
+// delete: deleting links by bare issue_id would drop another tenant's link rows
+// when a caller passes a foreign issue_id with its own workspace_id (the issue
+// itself is correctly untouched, but the links are already gone) — the exact
+// cross-tenant leak the #1661 guard above exists to prevent.
 func (q *Queries) DeleteIssue(ctx context.Context, arg DeleteIssueParams) error {
 	_, err := q.db.Exec(ctx, deleteIssue, arg.ID, arg.WorkspaceID)
 	return err
@@ -410,7 +434,7 @@ func (q *Queries) DeleteIssueMetadataKey(ctx context.Context, arg DeleteIssueMet
 const findActiveDuplicateIssue = `-- name: FindActiveDuplicateIssue :one
 SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties FROM issue
 WHERE workspace_id = $1
-  AND status NOT IN ('done', 'cancelled')
+  AND NOT issue_status_is_closed(status)
   AND project_id IS NOT DISTINCT FROM $2::uuid
   AND parent_issue_id IS NOT DISTINCT FROM $3::uuid
   AND lower(btrim(regexp_replace(title, '[[:space:]]+', ' ', 'g'))) = $4
@@ -467,7 +491,7 @@ func (q *Queries) FindActiveDuplicateIssue(ctx context.Context, arg FindActiveDu
 const findRecentAutopilotDuplicateIssue = `-- name: FindRecentAutopilotDuplicateIssue :one
 SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority, i.assignee_type, i.assignee_id, i.creator_type, i.creator_id, i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.origin_type, i.origin_id, i.first_executed_at, i.start_date, i.metadata, i.stage, i.properties FROM issue i
 WHERE i.workspace_id = $1
-  AND i.status NOT IN ('done', 'cancelled')
+  AND NOT issue_status_is_closed(i.status)
   AND i.origin_type = 'autopilot'
   AND i.origin_id = $2
   AND i.project_id IS NOT DISTINCT FROM $3::uuid
@@ -1058,7 +1082,7 @@ SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
        i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.metadata, i.stage, i.properties
 FROM issue i
 WHERE i.workspace_id = $1
-  AND i.status NOT IN ('done', 'cancelled')
+  AND NOT issue_status_is_closed(i.status)
   AND ($2::text IS NULL OR i.priority = $2)
   AND ($3::uuid IS NULL OR i.assignee_id = $3)
   AND ($4::uuid[] IS NULL OR i.assignee_id = ANY($4::uuid[]))

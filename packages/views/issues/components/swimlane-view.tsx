@@ -44,13 +44,14 @@ import {
   DropdownMenuItem,
 } from "@multica/ui/components/ui/dropdown-menu";
 import { sortIssues } from "../utils/sort";
-import { ALL_STATUSES, STATUS_CONFIG } from "@multica/core/issues/config";
+import { ALL_STATUSES, BOARD_STATUSES, STATUS_CONFIG } from "@multica/core/issues/config";
 import { DraggableBoardCard, BoardCardContent } from "./board-card";
 import { StatusIcon } from "./status-icon";
 import { Button } from "@multica/ui/components/ui/button";
 import { StatusHeading } from "./status-heading";
 import { HiddenColumnsPanel, HiddenColumnRow } from "./hidden-columns-panel";
 import { InfiniteScrollSentinel } from "./infinite-scroll-sentinel";
+import { ListLoadMoreFooter } from "./list-load-more-footer";
 import { AppLink } from "../../navigation";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { ActorAvatar } from "../../common/actor-avatar";
@@ -603,7 +604,7 @@ function SwimLaneViewImpl({
   issues,
   unfilteredIssues,
   activeFilters: activeFiltersProp,
-  visibleStatuses = ALL_STATUSES,
+  visibleStatuses = BOARD_STATUSES,
   hiddenStatuses = [],
   onMoveIssue,
   childProgressMap = EMPTY_PROGRESS_MAP,
@@ -694,11 +695,15 @@ function SwimLaneViewImpl({
     [myIssuesScope, myIssuesFilter],
   );
 
-  // Re-impose canonical status order (ALL_STATUSES) on whatever the controller
-  // marked visible, so columns — including `cancelled`, ordered last — render
-  // in lifecycle order.
+  // Re-impose canonical status order (BOARD_STATUSES by default, ALL_STATUSES
+  // when an explicit filter is active) so archived only renders when the user
+  // filtered for it (KTD4/R7).
   const sortedStatuses = useMemo(
-    () => ALL_STATUSES.filter((s) => visibleStatuses.includes(s)),
+    () =>
+      (visibleStatuses.length > 0 && visibleStatuses.includes("archived")
+        ? ALL_STATUSES
+        : BOARD_STATUSES
+      ).filter((s) => visibleStatuses.includes(s)),
     [visibleStatuses],
   );
 
@@ -1775,20 +1780,16 @@ function SwimLaneCell({
             &mdash;
           </p>
         )}
-        {page?.isError ? (
-          <button
-            type="button"
-            className="w-full py-2 text-xs text-destructive hover:underline"
-            onClick={page.retry}
-          >
-            {t(($) => $.table.load_more_failed_retry)}
-          </button>
-        ) : page?.hasMore ? (
-          <InfiniteScrollSentinel
-            onVisible={page.loadMore}
-            loading={page.isLoading || page.isFetching}
+        {page && (
+          <ListLoadMoreFooter
+            hasMore={page.hasMore}
+            isLoading={page.isLoading || page.isFetching}
+            total={page.total}
+            onLoadMore={page.loadMore}
+            isError={page.isError}
+            onRetry={page.retry}
           />
-        ) : null}
+        )}
       </div>
       {/* One of these per lane×status cell (~170 on a real swimlane) —
           eagerly mounted tooltip roots here were the single largest slice

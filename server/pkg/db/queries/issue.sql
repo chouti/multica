@@ -138,7 +138,7 @@ SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0));
 -- name: FindActiveDuplicateIssue :one
 SELECT * FROM issue
 WHERE workspace_id = $1
-  AND status NOT IN ('done', 'cancelled')
+  AND NOT issue_status_is_closed(status)
   AND project_id IS NOT DISTINCT FROM sqlc.arg('project_id')::uuid
   AND parent_issue_id IS NOT DISTINCT FROM sqlc.arg('parent_issue_id')::uuid
   AND lower(btrim(regexp_replace(title, '[[:space:]]+', ' ', 'g'))) = sqlc.arg('normalized_title')
@@ -148,7 +148,7 @@ LIMIT 1;
 -- name: FindRecentAutopilotDuplicateIssue :one
 SELECT i.* FROM issue i
 WHERE i.workspace_id = $1
-  AND i.status NOT IN ('done', 'cancelled')
+  AND NOT issue_status_is_closed(i.status)
   AND i.origin_type = 'autopilot'
   AND i.origin_id = $2
   AND i.project_id IS NOT DISTINCT FROM sqlc.arg('project_id')::uuid
@@ -170,7 +170,24 @@ LIMIT 1;
 -- (loadIssueForUser / GetIssueInWorkspace) already enforce membership today,
 -- but a future loader bypass or a new caller skipping the loader would be
 -- silently catastrophic without this guard. See incident #1661.
-DELETE FROM issue WHERE id = $1 AND workspace_id = $2;
+--
+-- issue_vcs_pull_request (migration 213) has no FK to issue, so the link rows
+-- are not cascaded away. Sweep them here so they go atomically with the issue.
+-- The mirrored PR rows themselves belong to the connection, not the issue, so
+-- they persist (matching the GitHub link behaviour).
+--
+-- The sweep MUST route through the same workspace-checked target as the issue
+-- delete: deleting links by bare issue_id would drop another tenant's link rows
+-- when a caller passes a foreign issue_id with its own workspace_id (the issue
+-- itself is correctly untouched, but the links are already gone) — the exact
+-- cross-tenant leak the #1661 guard above exists to prevent.
+WITH target AS (
+    SELECT issue.id FROM issue WHERE issue.id = $1 AND issue.workspace_id = $2
+),
+cleared_vcs_pr_links AS (
+    DELETE FROM issue_vcs_pull_request WHERE issue_id IN (SELECT target.id FROM target)
+)
+DELETE FROM issue WHERE issue.id IN (SELECT target.id FROM target);
 
 -- name: ListOpenIssues :many
 -- See ListIssues for the semantics of involves_user_id (mirrors the 4-branch
@@ -180,7 +197,7 @@ SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
        i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.metadata, i.stage, i.properties
 FROM issue i
 WHERE i.workspace_id = $1
-  AND i.status NOT IN ('done', 'cancelled')
+  AND NOT issue_status_is_closed(i.status)
   AND (sqlc.narg('priority')::text IS NULL OR i.priority = sqlc.narg('priority'))
   AND (sqlc.narg('assignee_id')::uuid IS NULL OR i.assignee_id = sqlc.narg('assignee_id'))
   AND (sqlc.narg('assignee_ids')::uuid[] IS NULL OR i.assignee_id = ANY(sqlc.narg('assignee_ids')::uuid[]))
@@ -336,7 +353,8 @@ GROUP BY assignee_type, assignee_id;
 -- name: ChildIssueProgress :many
 SELECT parent_issue_id,
        COUNT(*)::bigint AS total,
-       COUNT(*) FILTER (WHERE status IN ('done', 'cancelled'))::bigint AS done
+       COUNT(*) FILTER (WHERE issue_status_is_completed(status))::bigint AS done,
+       COUNT(*) FILTER (WHERE status = 'archived')::bigint AS archived
 FROM issue
 WHERE workspace_id = $1
   AND parent_issue_id IS NOT NULL
