@@ -17,17 +17,22 @@ MULTICA_HOME="${HOME}/.multica"
 LAUNCH_AGENTS="${HOME}/Library/LaunchAgents"
 UID_NUM="$(id -u)"
 
-# Source the repo .env so NEXT_PUBLIC_APP_VERSION (and friends) reflect the
-# checked-out release instead of falling back to the stale default below.
-# Without this a bare `install.sh` stamps the backend with the hard-coded
-# fallback and the Help menu silently reports the wrong version.
+# Source the repo .env so build-frontend.sh picks up non-version settings
+# such as REMOTE_API_URL. The version is NO LONGER read from .env — see
+# _version-stamp.sh below; the previous `${NEXT_PUBLIC_APP_VERSION:-v0.4.6}`
+# fallback is intentionally gone so a stale or missing .env no longer
+# stamps the wrong release. Without selfhost/_version-stamp.sh sourcing
+# this script here, the launchd build stamps v0.4.6 forever regardless of
+# the checked-out tag and the Help menu silently reports the wrong version.
 if [ -f "$REPO/.env" ]; then
   set -a
   # shellcheck disable=SC1091
   . "$REPO/.env"
   set +a
 fi
-VERSION="${NEXT_PUBLIC_APP_VERSION:-v0.4.6}"
+
+# shellcheck source=/dev/null
+. "$SELF_DIR/_version-stamp.sh"
 
 echo "==> Preparing $MULTICA_HOME ..."
 mkdir -p "$MULTICA_HOME"/{backend,scripts,logs}
