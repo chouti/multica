@@ -33,17 +33,44 @@ const SEMVER_RE = /v?(\d+)\.(\d+)\.(\d+)/;
 // the gate for staging or production users running stale stable releases.
 const DEV_DESCRIBE_RE = /^v?\d+\.\d+\.\d+-\d+-g[0-9a-fA-F]+/;
 
-function parseSemver(raw: string): [number, number, number] | null {
+/**
+ * Parse a semver string into a numeric triple. Tolerates a leading "v" and
+ * tolerates a trailing `git describe` suffix (e.g. `v0.2.15-235-gdaf0e935` is
+ * read as [0, 2, 15]) — the regex is intentionally not anchored end-to-end.
+ * Returns null when the major/minor/patch triple cannot be found.
+ */
+export function parseSemver(raw: string): [number, number, number] | null {
   const m = SEMVER_RE.exec(raw.trim());
   if (!m) return null;
   return [Number(m[1]), Number(m[2]), Number(m[3])];
 }
 
-function lessThan(a: [number, number, number], b: [number, number, number]) {
+/** Lexicographic semver comparison: a < b. */
+export function lessThan(a: [number, number, number], b: [number, number, number]) {
   if (a[0] !== b[0]) return a[0] < b[0];
   if (a[1] !== b[1]) return a[1] < b[1];
   return a[2] < b[2];
 }
+
+/**
+ * True when the daemon-reported version (any string parseable to a semver
+ * triple, including dev-describe shape) is strictly older than the server
+ * version. Either side unparseable returns false — the Help menu must not
+ * flag drift it cannot ground. Both inputs are passed through the same
+ * describe-aware parse path rather than the `officialBaseline` sanitizer,
+ * because dev-built daemons may carry `-N-g<hash>` suffixes that
+ * `officialBaseline` collapses to "".
+ */
+export function isDaemonOlderThanServer(
+  daemon: string | undefined | null,
+  server: string | undefined | null,
+): boolean {
+  const a = daemon == null ? null : parseSemver(daemon);
+  const b = server == null ? null : parseSemver(server);
+  if (!a || !b) return false;
+  return lessThan(a, b);
+}
+
 
 /**
  * Check a daemon-reported CLI version string against the minimum. Returns

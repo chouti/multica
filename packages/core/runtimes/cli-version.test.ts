@@ -4,6 +4,7 @@ import {
   checkQuickCreateCliVersion,
   checkQuickCreateFieldsCliVersion,
   handoffSupported,
+  isDaemonOlderThanServer,
   MIN_CHAT_PROJECT_CONTEXT_CLI_VERSION,
   MIN_HANDOFF_CLI_VERSION,
 } from "./cli-version";
@@ -89,5 +90,33 @@ describe("chatProjectContextSupported", () => {
   it("treats git-describe dev builds as supported regardless of base tag", () => {
     expect(chatProjectContextSupported("v0.4.8-37-g5d0275d68")).toBe(true);
     expect(chatProjectContextSupported("v0.1.0-235-gdaf0e935-dirty")).toBe(true);
+  });
+});
+
+describe("isDaemonOlderThanServer", () => {
+  it("returns true when the daemon is a clean tag older than the server", () => {
+    expect(isDaemonOlderThanServer("v0.4.11", "v0.4.12")).toBe(true);
+    expect(isDaemonOlderThanServer("0.4.11", "0.4.12")).toBe(true);
+  });
+
+  it("returns false when the daemon is newer than the server", () => {
+    expect(isDaemonOlderThanServer("v0.4.13", "v0.4.12")).toBe(false);
+  });
+
+  it("returns false when the daemon is equal to the server", () => {
+    expect(isDaemonOlderThanServer("v0.4.12", "v0.4.12")).toBe(false);
+  });
+
+  it("tolerates a git-describe suffix on the daemon string", () => {
+    expect(isDaemonOlderThanServer("v0.4.11-5-gabc1234", "v0.4.12")).toBe(true);
+    expect(isDaemonOlderThanServer("v0.4.12-dirty", "v0.4.12")).toBe(false);
+  });
+
+  it("returns false when either side is unparseable", () => {
+    expect(isDaemonOlderThanServer("", "v0.4.12")).toBe(false);
+    expect(isDaemonOlderThanServer("v0.4.12", "")).toBe(false);
+    expect(isDaemonOlderThanServer(undefined, "v0.4.12")).toBe(false);
+    expect(isDaemonOlderThanServer(null, null)).toBe(false);
+    expect(isDaemonOlderThanServer("garbage", "v0.4.12")).toBe(false);
   });
 });
