@@ -2708,8 +2708,12 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         )}
 
         {/* Sticky comment input — pinned to the bottom of the detail panel,
-            outside the scrollable timeline so it's always visible. */}
-        <div className="shrink-0 border-t bg-background px-8 py-3">
+            outside the scrollable timeline so it's always visible.
+            pr-14 on mobile reserves the bottom-right corner for the floating
+            chat FAB (ChatFab, absolute bottom-2 right-2 size-10 z-50) so it
+            can't cover the submit button; sm:pr-8 restores the symmetric
+            padding once the viewport is wide enough for both to coexist. */}
+        <div className="shrink-0 border-t bg-background pl-8 pr-14 py-3 sm:pr-8">
           <div className="mx-auto w-full max-w-4xl">
             {/* key={id}: web's /issues/[id] route doesn't remount on
                 issueId change, so without an explicit key the editor
