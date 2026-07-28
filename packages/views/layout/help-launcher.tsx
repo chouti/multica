@@ -12,6 +12,11 @@ import {
 } from "@multica/ui/components/ui/dropdown-menu";
 import { useModalStore } from "@multica/core/modals";
 import { useConfigStore } from "@multica/core/config";
+import { useCurrentWorkspace } from "@multica/core/paths";
+import { isDaemonOlderThanServer } from "@multica/core/runtimes/cli-version";
+import { selectRepresentativeCliVersion } from "@multica/core/runtimes/select-cli-version";
+import { runtimeListOptions } from "@multica/core/runtimes/queries";
+import { useQuery } from "@tanstack/react-query";
 import { DISCORD_URL, DiscordIcon } from "./discord";
 import { useT } from "../i18n";
 
@@ -20,22 +25,57 @@ const CHANGELOG_URL = "https://multica.ai/changelog";
 
 export function HelpLauncher() {
   const { t } = useT("layout");
-  // Read frontend and backend observations independently so a partial
-  // rollout or a missing backend metadata can render each row with its own
-  // state (tag / loading / unavailable) instead of inventing a value.
-  const frontendBaseline = useConfigStore((state) => state.frontendBaseline);
+  // Read each observation from its own source so a partial rollout or a
+  // missing backend metadata can render each row with its own state
+  // (tag / loading / unavailable) instead of inventing a value.
   const backendBaseline = useConfigStore((state) => state.backendBaseline);
   const backendBaselineStatus = useConfigStore(
     (state) => state.backendBaselineStatus,
+  );
+
+  // Share the runtimes React Query cache with the rest of the app (the
+  // sidebar indicator, the Runtimes page, presence previews). `enabled: false`
+  // means the Help menu reads whatever the cache already has and does not
+  // trigger a fresh fetch — the cache is warmed by other on-screen consumers
+  // and the Help menu's own row would otherwise force every Help-open into a
+  // network round-trip. When no workspace is in scope (e.g. logged-out
+  // pages), `wsId` is undefined and the query is disabled.
+  const workspace = useCurrentWorkspace();
+  const wsId = workspace?.id;
+  const runtimes = useQuery({
+    ...runtimeListOptions(wsId ?? ""),
+    enabled: false,
+  }).data;
+
+  // Pick one daemon to surface in the compact Help row. The selector falls
+  // through within each candidate set (online preferred, else all), mirroring
+  // the per-machine aggregator used by the Runtimes surfaces.
+  const cliVersion = selectRepresentativeCliVersion(runtimes ?? []) ?? "";
+
+  // Drift flag is older-than-server only — a newer daemon is backward-
+  // compatible and not 502-risk, so it does not surface as drift. Comparison
+  // is describe-aware so a dev-built daemon (v0.4.12-5-gabc1234) compares
+  // correctly against the server's clean tag instead of reading unavailable.
+  const drift = Boolean(
+    cliVersion &&
+      backendBaseline &&
+      isDaemonOlderThanServer(cliVersion, backendBaseline),
   );
 
   // The provenance rows are intentionally always present in the DOM (even
   // when unavailable): self-host operators rely on them to confirm what is
   // deployed. A hidden row would make a stale or rolled-back artifact look
   // identical to a missing one, defeating the whole feature.
-  const frontendText = frontendBaseline
-    ? frontendBaseline
-    : t(($) => $.help.frontend_unavailable);
+  let cliText: string;
+  if (!cliVersion) {
+    if (runtimes === undefined) {
+      cliText = t(($) => $.help.cli_loading);
+    } else {
+      cliText = t(($) => $.help.cli_unavailable);
+    }
+  } else {
+    cliText = cliVersion;
+  }
   const backendText =
     backendBaseline ||
     (backendBaselineStatus === "loading"
@@ -103,8 +143,14 @@ export function HelpLauncher() {
             dropdown-label context surrounds both. */}
         <DropdownMenuGroup>
           <DropdownMenuLabel className="flex items-center gap-2 font-normal text-muted-foreground">
-            <span>{t(($) => $.help.frontend_label)}</span>
-            <span className="text-foreground">{frontendText}</span>
+            <span>{t(($) => $.help.cli_label)}</span>
+            <span
+              className={
+                drift ? "text-foreground text-destructive" : "text-foreground"
+              }
+            >
+              {cliText}
+            </span>
           </DropdownMenuLabel>
           <DropdownMenuLabel className="flex items-center gap-2 font-normal text-muted-foreground">
             <span>{t(($) => $.help.backend_label)}</span>

@@ -33,9 +33,10 @@
     "changelog": "更新日志",
     "discord": "Discord",
     "feedback": "反馈",
-    "frontend_label": "前端",
+    "cli_label": "客户端 CLI",
     "backend_label": "后端",
-    "frontend_unavailable": "前端版本不可用",
+    "cli_unavailable": "客户端 CLI 版本不可用",
+    "cli_loading": "客户端 CLI 版本加载中...",
     "backend_unavailable": "后端版本不可用",
     "backend_loading": "后端版本加载中..."
   },

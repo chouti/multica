@@ -33,9 +33,10 @@
     "changelog": "Change log",
     "discord": "Discord",
     "feedback": "Feedback",
-    "frontend_label": "Frontend",
+    "cli_label": "CLI",
     "backend_label": "Backend",
-    "frontend_unavailable": "Frontend unavailable",
+    "cli_unavailable": "CLI unavailable",
+    "cli_loading": "CLI loading...",
     "backend_unavailable": "Backend unavailable",
     "backend_loading": "Backend loading..."
   },

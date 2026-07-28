@@ -33,9 +33,10 @@
     "changelog": "変更ログ",
     "discord": "Discord",
     "feedback": "フィードバック",
-    "frontend_label": "フロントエンド",
+    "cli_label": "CLI",
     "backend_label": "バックエンド",
-    "frontend_unavailable": "フロントエンドのバージョンを取得できません",
+    "cli_unavailable": "CLI のバージョンを取得できません",
+    "cli_loading": "CLI のバージョン取得中...",
     "backend_unavailable": "バックエンドのバージョンを取得できません",
     "backend_loading": "バックエンドのバージョン取得中..."
   },
