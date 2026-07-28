@@ -1,6 +1,7 @@
 ---
 title: Runtime build provenance — surfacing the official release baseline in the Help menu
 date: 2026-07-16
+last_updated: 2026-07-28
 category: architecture-patterns
 module: multica
 problem_type: architecture_pattern
@@ -9,15 +10,17 @@ severity: medium
 applies_when:
   - "Self-hosted builds where operators must verify which release is running"
   - "Artifacts whose provenance depends on the host git checkout (multiple tags available, including local-only ones)"
-  - "Multi-process products whose frontend and backend must agree on a single stamped version"
+  - "Multi-process products whose server and daemon must surface version agreement (the server and daemon are independently stamped and independently upgrade)"
   - "Air-gapped, shallow-clone, or forked checkouts where the resolver cannot reach the canonical remote"
-tags: build-provenance, self-hosting, git-describe, help-menu, baseline-resolution, multica
+tags: build-provenance, self-hosting, git-describe, help-menu, baseline-resolution, daemon-cli, drift-flag, multica
 related_components:
   - scripts/resolve-official-baseline.sh
   - server/cmd/server/router.go
   - apps/web/components/web-providers.tsx
   - packages/core/config/index.ts
   - packages/views/layout/help-launcher.tsx
+  - packages/core/runtimes/cli-version.ts
+  - packages/core/runtimes/select-cli-version.ts
 ---
 
 # Runtime build provenance — surfacing the official release baseline in the Help menu
@@ -124,12 +127,11 @@ The platform boundary runs the raw env var through `officialBaseline()` before i
 
 ### 4. Render the two rows
 
-`packages/views/layout/help-launcher.tsx:36-43` is the rendering site. The two provenance rows are **always present in the DOM**, even when unavailable — a hidden row would make a stale or rolled-back artifact look identical to a missing one, defeating the whole feature:
+`packages/views/layout/help-launcher.tsx` is the rendering site. The two provenance rows are **always present in the DOM**, even when unavailable — a hidden row would make a stale or rolled-back artifact look identical to a missing one, defeating the whole feature.
+
+The **Backend** row reads the server's `server_version` from the config store and renders one of three states (tag / loading / unavailable):
 
 ```tsx
-const frontendText = frontendBaseline
-  ? frontendBaseline
-  : t(($) => $.help.frontend_unavailable);
 const backendText =
   backendBaseline ||
   (backendBaselineStatus === "loading"
@@ -137,7 +139,28 @@ const backendText =
     : t(($) => $.help.backend_unavailable));
 ```
 
-Each row uses a distinct copy state (tag / loading / unavailable) so a partial rollout, a missing backend metadata, or a network failure renders each row with its own honest state. The locale keys live in `packages/views/locales/en/layout.json:22-26` and the other three locales.
+The **CLI** row reads the most-recently-active daemon's `cli_version` from `/api/runtimes/` (via `selectRepresentativeCliVersion`), renders one of three states (tag / loading / unavailable), and applies `text-destructive` when the daemon is **older than the server**:
+
+```tsx
+let cliText;
+if (noWorkspace) {
+  cliText = t(($) => $.help.cli_unavailable);
+} else if (!cliVersion) {
+  cliText = runtimes === undefined
+    ? t(($) => $.help.cli_loading)
+    : t(($) => $.help.cli_unavailable);
+} else {
+  cliText = cliVersion;
+}
+const drift =
+  Boolean(cliVersion) &&
+  Boolean(backendBaseline) &&
+  isDaemonOlderThanServer(cliVersion, backendBaseline);
+```
+
+The drift comparison uses **describe-aware** `parseSemver` / `lessThan` from `packages/core/runtimes/cli-version.ts` — not `officialBaseline`. Dev-built daemons carry `-N-g<hash>` describe suffixes that `officialBaseline` rejects; routing them through the baseline gate would misreport every dev daemon as unavailable. `parseSemver` parses the leading `vX.Y.Z` triple and ignores the tail, so a dev daemon compares correctly against the server's clean tag. Drift is **older-only** — a newer daemon is backward-compatible and not 502-risk, so the flag fires only in the dangerous direction. See `daemon-cli-version-drift-detection.md` for the full design rationale.
+
+The locale keys live in `packages/views/locales/{en,zh-Hans,ja,ko}/layout.json` under `help.cli_label`, `help.cli_unavailable`, `help.cli_loading`, `help.backend_label`, `help.backend_unavailable`, `help.backend_loading`. The `help.frontend_label` / `help.frontend_unavailable` keys were removed when the frontend row was dropped — once the launchd path auto-stamps both halves from a single resolver-driven source, the two stamps are guaranteed identical by mechanism, so the frontend row became redundant noise.
 
 ## Why This Matters
 
@@ -212,7 +235,7 @@ upgrade: ## Rebuild backend + frontend prod bundle with the resolved official ba
 
 A single `make upgrade` (or `MULTICA_TRUSTED_BASELINE=v0.4.2 make upgrade` from an offline host) stamps the backend binary and the web prod bundle with the same value.
 
-**The sidebar shows two honest rows** (`packages/views/layout/help-launcher.tsx:104-113`):
+**The sidebar shows two honest rows** (`packages/views/layout/help-launcher.tsx`):
 
 ```
 ┌─────────────────────────────────────┐
@@ -221,24 +244,30 @@ A single `make upgrade` (or `MULTICA_TRUSTED_BASELINE=v0.4.2 make upgrade` from 
 │  Discord                    ↗      │
 │  Send feedback                     │
 │ ────────────────────────────────── │
-│  Frontend  v0.4.2                  │
-│  Backend   v0.4.2                  │
+│  CLI       v0.4.12                 │
+│  Backend   v0.4.12                 │
 └─────────────────────────────────────┘
 ```
 
-Or, on a fork whose `v*` tags aren't on the upstream, after a `MULTICA_TRUSTED_BASELINE` override:
+When the most-recently-active daemon is older than the server, the CLI row is flagged with `text-destructive`:
 
 ```
-│  Frontend  v0.4.2                  │
-│  Backend   v0.4.2                  │
+│  CLI       v0.4.11   ← red, drift  │
+│  Backend   v0.4.12                 │
 ```
 
-And on a build where the env var wasn't set (the resolver failed and the operator proceeded anyway, or they're on an older build):
+When no workspace is in scope (e.g. a logged-out page), the CLI row renders `unavailable`; when the runtimes cache is cold, it renders `loading`:
 
 ```
-│  Frontend  Frontend unavailable    │
+│  CLI       CLI loading...          │
 │  Backend   Backend loading...      │
-│              → Backend unavailable │
+```
+
+Or, when a daemon exists but none has reported a version:
+
+```
+│  CLI       CLI unavailable         │
+│  Backend   v0.4.12                 │
 ```
 
 Each state is honest, distinct, and actionable.
@@ -273,4 +302,4 @@ Each of these would justify its own learning if implemented. They are listed her
 - Help menu rendering: `packages/views/layout/help-launcher.tsx:36-43` (text selection) and `packages/views/layout/help-launcher.tsx:104-113` (two-row rendering in the DropdownMenuGroup).
 - Operator-facing docs: `SELF_HOSTING.md` — sections "Upgrading → Direct production upgrade (no Docker)", "Manual Docker Compose Setup → Source build from checkout", "Direct production build (no Docker)", and "Recovery when baseline can't be resolved".
 - Build target: `Makefile:395-411` (`upgrade` target).
-- Locale strings: `packages/views/locales/en/layout.json:22-26` and the other three locales for `frontend_label`, `frontend_unavailable`, `backend_label`, `backend_unavailable`, `backend_loading`.
+- Locale strings: `packages/views/locales/{en,zh-Hans,ja,ko}/layout.json` for `cli_label`, `cli_unavailable`, `cli_loading`, `backend_label`, `backend_unavailable`, `backend_loading`. The `help.frontend_label` / `help.frontend_unavailable` keys were removed when the frontend row was dropped (the two stamps were guaranteed identical by the resolver-driven single source, so the row became redundant noise).

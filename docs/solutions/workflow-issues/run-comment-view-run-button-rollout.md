@@ -1,6 +1,9 @@
 ---
 title: "Run-comment View run button — deployment SOP, monitoring SQL, rollback"
 date: 2026-07-13
+status: stale
+stale_reason: Deployment runbook for a historical rollout. The migration (158) was deployed and is reflected in the live DB; U1/U2/U3/U4 code landed. The "Known deferred items" e2e specs (run-view-button.spec.ts, run-view-button-backfill.spec.ts) were never authored, and the step-by-step rollout steps are no longer actionable. Kept as historical reference; cross-workspace-cloned-agent-skill-refs-leak-source-uuids.md cites it, so the doc is not deleted.
+stale_date: 2026-07-28
 category: "workflow-issues"
 module: "comments"
 problem_type: "workflow_issue"
@@ -228,9 +231,10 @@ WHERE c.author_type = 'agent'
 ```bash
 # After both code and migration are live, run the e2e suites the
 # plan reserves for U5 (placeholders; create alongside when the
-# staging environment is ready):
-#   e2e/issues/run-view-button.spec.ts
-#   e2e/issues/run-view-button-backfill.spec.ts
+# staging environment is ready). Neither spec has been authored yet —
+# both are listed in the "Known deferred items" section at the end of
+# this document. The hook and component tests in the package are the
+# unit-level regression guard.
 
 # Local regression (already green pre-deploy):
 cd packages/views && pnpm test    # 1797 vitest cases
@@ -310,7 +314,8 @@ reports non-zero rows.
   defensive but the workspace guard cannot help. Run a one-off
   audit before this rollout.
 
-- **e2e specs**: Author `e2e/issues/run-view-button.spec.ts` and
-  `e2e/issues/run-view-button-backfill.spec.ts` in a follow-up
-  PR when the staging environment supports Playwright with a
-  seeded user.
+- **e2e specs**: The two Playwright e2e specs reserved for this rollout
+  (run-view-button and run-view-button-backfill, in the e2e issues
+  directory) have not yet been authored. They should be created in a
+  follow-up PR when the staging environment supports Playwright with
+  a seeded user.

@@ -21,7 +21,7 @@ tags: [self-host, launchd, install-sh, upgrade-reload, provenance]
 ## Problem
 `scripts/selfhost/install.sh` rebuilds the frontend standalone + backend binary, but does **not** reliably reload them after an upgrade. The reload path uses `launchctl bootstrap`, which on an already-loaded plist errors `Load failed: 5` and does **not** restart the running process — so a freshly rebuilt binary never takes effect; the old process keeps running the old binary's in-memory image.
 
-Originally this doc also tracked a separate defect: install.sh did not source `.env`, so a bare run stamped the backend with the hardcoded `v0.4.6` fallback regardless of the checked-out tag. That defect was closed on 2026-07-27 (commit `9c1a9e1bb`) and is now superseded by the single-source approach in `version-reporting-after-upstream-upgrade.md` — install.sh derives VERSION from `resolve-official-baseline.sh` and exports NEXT_PUBLIC_APP_VERSION so `build-frontend.sh` inherits the same value.
+Originally this doc also tracked a separate defect: install.sh did not source `.env`, so a bare run stamped the backend with the hardcoded `v0.4.6` fallback regardless of the checked-out tag. That defect was closed on 2026-07-27 (commit `9c1a9e1bb` on this self-host fork — local main history, no upstream PR; the SHA is stable on this checkout and not rewritten by rebase) and is now superseded by the single-source approach in `version-reporting-after-upstream-upgrade.md` — install.sh derives VERSION from `resolve-official-baseline.sh` and exports NEXT_PUBLIC_APP_VERSION so `build-frontend.sh` inherits the same value.
 
 ## What Didn't Work
 - **Bare `bash scripts/selfhost/install.sh`** (expecting rebuild + restart): the launchctl reload silently noop'd — `server_version` stayed at the old tag.
@@ -50,7 +50,7 @@ curl -s http://localhost:8081/api/config | grep -oE '"server_version":"[^"]*"'  
 
 1. **`launchctl bootstrap` does not restart a running process.** install.sh uses `launchctl bootstrap` (load plist). On an already-loaded plist it errors `Load failed: 5` and does **not** restart the process — so a freshly rebuilt binary never takes effect. `launchctl start`/`kickstart` restart a loaded job; if install.sh bootout'd the job (plist unloaded), recover with `launchctl bootstrap + start`.
 
-2. ~~**install.sh does not source `.env`** (closed).~~ Replaced with `resolve-official-baseline.sh`-driven VERSION derivation; see `version-reporting-after-upstream-upgrade.md` and `architecture-patterns/runtime-build-provenance.md`.
+2. ~~**install.sh does not source `.env`** (closed).~~ Replaced with `resolve-official-baseline.sh`-driven VERSION derivation; see `version-reporting-after-upstream-upgrade.md` and `../architecture-patterns/runtime-build-provenance.md`.
 
 The wrong stamp was historically **hard to notice** because `officialBaseline` maps only `"dev"` and git-describe `-N-g` suffixes to `""` — a clean but stale tag returned verbatim, so `/api/config` showed a version (not missing), just the wrong one. That gotcha is closed by the resolver now; a stale stamp would manifest as a failure-to-resolve (exit 1), not a silently-wrong tag.
 
