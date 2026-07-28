@@ -57,6 +57,7 @@
     "./runtimes/cli-version": "./runtimes/cli-version.ts",
     "./runtimes/queries": "./runtimes/queries.ts",
     "./runtimes/select-cli-version": "./runtimes/select-cli-version.ts",
+    "./runtimes/runtime-report-time": "./runtimes/runtime-report-time.ts",
     "./runtimes/mutations": "./runtimes/mutations.ts",
     "./runtimes/custom-pricing-store": "./runtimes/custom-pricing-store.ts",
     "./dashboard": "./dashboard/index.ts",

@@ -56,11 +56,10 @@ export function HelpLauncher() {
   // compatible and not 502-risk, so it does not surface as drift. Comparison
   // is describe-aware so a dev-built daemon (v0.4.12-5-gabc1234) compares
   // correctly against the server's clean tag instead of reading unavailable.
-  const drift = Boolean(
-    cliVersion &&
-      backendBaseline &&
-      isDaemonOlderThanServer(cliVersion, backendBaseline),
-  );
+  const drift =
+    Boolean(cliVersion) &&
+    Boolean(backendBaseline) &&
+    isDaemonOlderThanServer(cliVersion, backendBaseline);
 
   // The provenance rows are intentionally always present in the DOM (even
   // when unavailable): self-host operators rely on them to confirm what is

@@ -14,6 +14,7 @@
  * Pure function over `AgentRuntime[]` — no React Query, no config store.
  */
 import type { AgentRuntime } from "@multica/core/types/agent";
+import { compareRuntimeReports } from "./runtime-report-time";
 import { readRuntimeCliVersion } from "./cli-version";
 
 /** Pick the most-recently-active daemon's `cli_version`, falling through to
@@ -24,19 +25,10 @@ export function selectRepresentativeCliVersion(runtimes: AgentRuntime[]): string
   const online = runtimes.filter((runtime) => runtime.status === "online");
   const candidates = online.length > 0 ? online : runtimes;
 
-  // Compare helpers duplicate `runtime-machines.ts`'s pattern rather than
-  // importing it: packages/core cannot depend on packages/views (CLAUDE.md),
-  // and these three lines are smaller than the dep would be worth.
-  function reportTime(rt: AgentRuntime): number {
-    const at = rt.last_seen_at ?? rt.updated_at;
-    const t = Date.parse(at);
-    return Number.isNaN(t) ? 0 : t;
-  }
-  const compare = (a: AgentRuntime, b: AgentRuntime) => reportTime(b) - reportTime(a);
-
-  for (const runtime of candidates.toSorted(compare)) {
+  for (const runtime of candidates.toSorted(compareRuntimeReports)) {
     const v = readRuntimeCliVersion(runtime.metadata);
-    if (v.trim()) return v.trim();
+    if (v.trim()) return v;
   }
   return null;
 }
+

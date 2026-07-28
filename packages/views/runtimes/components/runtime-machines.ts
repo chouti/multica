@@ -1,4 +1,4 @@
-import { deriveRuntimeHealth, type RuntimeHealth } from "@multica/core/runtimes";
+import { compareRuntimeReports, deriveRuntimeHealth, type RuntimeHealth } from "@multica/core/runtimes";
 import type { AgentRuntime } from "@multica/core/types";
 import { formatDeviceInfo } from "../utils";
 
@@ -398,16 +398,6 @@ function currentMachineMetadata(
     if (typeof value === "string" && value.trim()) return value.trim();
   }
   return null;
-}
-
-function compareRuntimeReports(a: AgentRuntime, b: AgentRuntime): number {
-  return runtimeReportTime(b) - runtimeReportTime(a);
-}
-
-function runtimeReportTime(runtime: AgentRuntime): number {
-  const reportedAt = runtime.last_seen_at ?? runtime.updated_at;
-  const timestamp = Date.parse(reportedAt);
-  return Number.isNaN(timestamp) ? 0 : timestamp;
 }
 
 function shortDaemonId(daemonId: string): string {

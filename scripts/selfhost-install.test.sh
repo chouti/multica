@@ -106,7 +106,6 @@ git -C "$WORK/upstream" tag "v0.4.12-fixture-test"
 # pair so nothing leaks into the user's branch.
 cd "$ROOT_DIR"
 ORIG_BRANCH="$(git branch --show-current)"
-ORIG_TAG="$(git describe --tags --abbrev=0 2>/dev/null || true)"
 cleanup_fixture_tags() {
   git tag -d "v0.4.12-fixture-test" 2>/dev/null || true
   git checkout "$ORIG_BRANCH" >/dev/null 2>&1 || git checkout - >/dev/null 2>&1 || true

@@ -110,7 +110,7 @@ function makeRuntime(cli_version: string | undefined, status: "online" | "offlin
 describe("HelpLauncher provenance rows", () => {
   it("renders CLI as unavailable when no runtimes data exists yet", () => {
     runtimesForQuery = undefined;
-    render(<HelpLauncher />); // eslint-disable-line @typescript-eslint/no-unused-vars
+    render(<HelpLauncher />);
     expect(screen.getByText(enLayout.help.cli_label)).toBeInTheDocument();
     expect(screen.getByText(enLayout.help.cli_loading)).toBeInTheDocument();
     expect(screen.getByText(enLayout.help.backend_loading)).toBeInTheDocument();
@@ -119,7 +119,7 @@ describe("HelpLauncher provenance rows", () => {
   it("renders CLI version when a daemon is connected and matches the server", () => {
     runtimesForQuery = [makeRuntime("v0.4.12")];
     configStore.getState().setBackendBaseline("v0.4.12");
-    render(<HelpLauncher />); // eslint-disable-line @typescript-eslint/no-unused-vars
+    render(<HelpLauncher />);
     // Both rows show the same tag; assert both are present and neither carries
     // drift (daemon equal to server → no flag).
     const spans = screen.getAllByText("v0.4.12");
@@ -130,7 +130,7 @@ describe("HelpLauncher provenance rows", () => {
   it("renders the CLI version with destructive styling when the daemon is older than the server", () => {
     runtimesForQuery = [makeRuntime("v0.4.11")];
     configStore.getState().setBackendBaseline("v0.4.12");
-    render(<HelpLauncher />); // eslint-disable-line @typescript-eslint/no-unused-vars
+    render(<HelpLauncher />);
     const valueSpans = screen.getAllByText("v0.4.11");
     expect(valueSpans.length).toBeGreaterThan(0);
     const valueSpan = valueSpans[0];
@@ -141,7 +141,7 @@ describe("HelpLauncher provenance rows", () => {
   it("renders the CLI version without drift when the daemon is newer than the server", () => {
     runtimesForQuery = [makeRuntime("v0.4.13")];
     configStore.getState().setBackendBaseline("v0.4.12");
-    render(<HelpLauncher />); // eslint-disable-line @typescript-eslint/no-unused-vars
+    render(<HelpLauncher />);
     const valueSpans = screen.getAllByText("v0.4.13");
     expect(valueSpans.length).toBeGreaterThan(0);
     const valueSpan = valueSpans[0];
@@ -152,7 +152,7 @@ describe("HelpLauncher provenance rows", () => {
   it("renders CLI as unavailable when runtimes are loaded but none have a cli_version", () => {
     runtimesForQuery = [makeRuntime("")];
     configStore.getState().setBackendBaseline("v0.4.12");
-    render(<HelpLauncher />); // eslint-disable-line @typescript-eslint/no-unused-vars
+    render(<HelpLauncher />);
     expect(screen.getByText(enLayout.help.cli_unavailable)).toBeInTheDocument();
     expect(screen.getByText("v0.4.12")).toBeInTheDocument();
   });
@@ -160,7 +160,7 @@ describe("HelpLauncher provenance rows", () => {
   it("renders both rows as unavailable after a config failure and an empty runtime list", () => {
     runtimesForQuery = [];
     configStore.getState().setBackendBaseline(); // settled, unavailable
-    render(<HelpLauncher />); // eslint-disable-line @typescript-eslint/no-unused-vars
+    render(<HelpLauncher />);
     expect(screen.getByText(enLayout.help.cli_unavailable)).toBeInTheDocument();
     expect(screen.getByText(enLayout.help.backend_unavailable)).toBeInTheDocument();
   });
@@ -171,6 +171,6 @@ describe("HelpLauncher provenance rows", () => {
   it("does not throw when rendering both rows under a DropdownMenuGroup", () => {
     runtimesForQuery = [makeRuntime("v0.4.12")];
     configStore.getState().setBackendBaseline("v0.4.12");
-    expect(() => render(<HelpLauncher />)).not.toThrow(); // eslint-disable-line @typescript-eslint/no-unused-vars
+    expect(() => render(<HelpLauncher />)).not.toThrow();
   });
 });
