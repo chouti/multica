@@ -8,8 +8,12 @@ import { HelpLauncher } from "./help-launcher";
 // Stubs for hooks the HelpLauncher pulls in. The network / React Query plumbing
 // is exercised by integration tests elsewhere; here we drive the runtimes
 // read deterministically via the useQuery mock per test.
+// Per-test override of the workspace context. `null` mimics no-workspace
+// contexts (logged-out pages, worktree-flapping slug transitions); the
+// default `ws-test` preserves the existing tests' behavior.
+let workspaceForTest: { id: string } | null = { id: "ws-test" };
 vi.mock("@multica/core/paths", () => ({
-  useCurrentWorkspace: () => ({ id: "ws-test" }),
+  useCurrentWorkspace: () => workspaceForTest,
 }));
 
 let runtimesForQuery: unknown = undefined;
@@ -83,6 +87,7 @@ afterEach(() => {
   configStore.getState().setBackendBaseline("");
   configStore.setState({ backendBaselineStatus: "loading" });
   runtimesForQuery = undefined;
+  workspaceForTest = { id: "ws-test" };
 });
 
 function makeRuntime(cli_version: string | undefined, status: "online" | "offline" = "online") {
@@ -108,12 +113,22 @@ function makeRuntime(cli_version: string | undefined, status: "online" | "offlin
 }
 
 describe("HelpLauncher provenance rows", () => {
-  it("renders CLI as unavailable when no runtimes data exists yet", () => {
+  it("renders CLI as loading when no runtimes data exists yet (workspace present)", () => {
     runtimesForQuery = undefined;
     render(<HelpLauncher />);
     expect(screen.getByText(enLayout.help.cli_label)).toBeInTheDocument();
     expect(screen.getByText(enLayout.help.cli_loading)).toBeInTheDocument();
     expect(screen.getByText(enLayout.help.backend_loading)).toBeInTheDocument();
+  });
+
+  it("renders CLI as unavailable when no workspace is in scope (plan U3 step 4)", () => {
+    // Without a workspace, the runtimes query is disabled (enabled:false) and
+    // never resolves; the row must NOT stick on cli_loading forever.
+    workspaceForTest = null;
+    runtimesForQuery = undefined;
+    render(<HelpLauncher />);
+    expect(screen.getByText(enLayout.help.cli_unavailable)).toBeInTheDocument();
+    expect(screen.queryByText(enLayout.help.cli_loading)).not.toBeInTheDocument();
   });
 
   it("renders CLI version when a daemon is connected and matches the server", () => {

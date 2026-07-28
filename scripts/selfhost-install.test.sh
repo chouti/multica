@@ -90,6 +90,21 @@ expect_fail() {
 # we want the resolver to derive. The resolver verifies its candidate against
 # `git ls-remote $MULTICA_UPSTREAM_REMOTE`; pointing that at a local fixture
 # keeps the test offline and deterministic.
+
+# Wiring invariant (adversarial review #1): the run_install_stamp helper
+# sources _version-stamp.sh directly; it does NOT exercise install.sh's
+# `if [ -f .env ]; ...; . "$SELF_DIR/_version-stamp.sh"` header. This single
+# grep assertion locks in the wiring that makes the helper test load-bearing
+# — if a contributor removes or relocates that source line, the stamp-helper
+# tests would still pass but install.sh would silently stop stamping the
+# release tag. The grep is a cheap guard against that green-while-red gap.
+if ! grep -Fq '. "$SELF_DIR/_version-stamp.sh"' "$ROOT_DIR/scripts/selfhost/install.sh"; then
+  echo "FAIL - install.sh wiring invariant: install.sh must source _version-stamp.sh via '. \"\$SELF_DIR/_version-stamp.sh\"'" >&2
+  fails=$((fails + 1))
+else
+  pass=$((pass + 1))
+fi
+
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 

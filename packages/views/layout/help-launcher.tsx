@@ -65,13 +65,23 @@ export function HelpLauncher() {
   // when unavailable): self-host operators rely on them to confirm what is
   // deployed. A hidden row would make a stale or rolled-back artifact look
   // identical to a missing one, defeating the whole feature.
+  //
+  // Three-state CLI row, branched in this order so no-workspace-context
+  // (per plan U3 step 4) and cold-cache states each render the right text:
+  //   - no workspace context → unavailable (would otherwise stick at
+  //     `cli_loading` forever because the disabled query never resolves).
+  //   - workspace present but the runtimes query is still loading → loading.
+  //   - workspace present, query settled, no representative → unavailable.
+  //   - workspace present, query settled, representative exists → version.
+  const noWorkspace = wsId === undefined;
   let cliText: string;
-  if (!cliVersion) {
-    if (runtimes === undefined) {
-      cliText = t(($) => $.help.cli_loading);
-    } else {
-      cliText = t(($) => $.help.cli_unavailable);
-    }
+  if (noWorkspace) {
+    cliText = t(($) => $.help.cli_unavailable);
+  } else if (!cliVersion) {
+    cliText =
+      runtimes === undefined
+        ? t(($) => $.help.cli_loading)
+        : t(($) => $.help.cli_unavailable);
   } else {
     cliText = cliVersion;
   }
