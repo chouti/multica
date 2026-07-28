@@ -5,6 +5,28 @@ Guidance for Claude Code when working in this repository. Keep this file short a
 ## 用户偏好
 
 - **语言要求**：不论用户使用什么语言交互，始终使用简体中文回复和沟通。
+- 内部 markdown 文档（docs/plans、docs/solutions、CONCEPTS、docs/explainers、requirements-only plan）默认简体中文。
+- PR title、PR body、commit message、GitHub Issue title/body 保持英文（沿用 Multica 团队 4-locale 协作约定，与 `conventions.mdx` 同体系）。
+- 用户中英混血提问（"帮我 rebase 这个 PR"、"plan 这个需求"等）不主动中译英、英译中，不主动提示"我应该用中文 / 英文回答"，把用户混血视为其个人 voice 一部分，回应用与之匹配的语言密度。
+  - 语言密度裁决（R5a）：最近一条用户输入（句子级）按字符比判定。
+    - 中文字符占总字符 60% 及以上 → 中文为主（其余夹杂字符允许）。
+    - 英文字符占总字符 60% 及以上 → 英文为主。
+    - 其余比例按主规则默认中文。
+- 豁免白名单（无论上层规则一律英文）：commit type/scope（`feat`、`fix`、`refactor`、`docs`、`test`、`chore`、`server`、`packages/core`、`apps/web` 等）；文件路径、API 字段、命令名（`packages/views/HomePage.tsx`、`X-Workspace-ID`、`pnpm dev:web`、`make start`）；CLI / REPL 输出原文（`pnpm` stack trace、`tsc` 编译报错、`go vet` 输出）；代码块整体按原文；YAML frontmatter 字段名（`module`、`tags`、`problem_type`、`artifact_contract`、`artifact_readiness`）；文档 H1 标题按英文 `Title - Plan` 模板。
+
+- **承载点说明（三层分工 + 覆盖域）**：
+
+  | 受众 agent 类 | CLAUDE.md (本节) | auto-memory (feedback_zh_guardrails.md) | docs/solutions 留档 |
+  |---|---|---|---|
+  | 主会话 Claude Code 进程 | ✓ 读本文件 `## 用户偏好` | ✓ 注入 user memory | ✗ 仅供未来 grep |
+  | CE sub-agent (ce-compound) | ✗ SKILL.md 不读 CLAUDE.md | △ ✓ 仅 forward 给 ce-compound 内部 Phase 1 子 agent（Context Analyzer + Solution Extractor，详见 `~/.claude/plugins/cache/compound-engineering-plugin/compound-engineering/3.20.0/skills/ce-compound/SKILL.md:103-118`） | ✗ |
+  | CE sub-agent（ce-brainstorm / ce-plan / ce-code-review / ce-simplify-code / ce-commit / ce-commit-push-pr） | ✗ 无 `system_prompt` 注入位 | △ 仅在主 agent 把 memory 透传到 sub-agent 时有效（CE v3.20.0 不保证） | ✗ |
+  | 第三方 agent（IDE 扩展 / 自动 code review bot） | ✓ 读本文件 | ✗ 进程不绑 multica 项目 memory scope | ✗ |
+
+  `docs/solutions/workflow-issues/2026-07-28-002-ce-zh-language-guardrail-solution.md` 是治理留档，承担"未来接手 / 升级时可检索"职能，**不进入运行时执行上下文**，与本节 + auto-memory 三层分工互不重叠。仅本节对前两类 agent 提供真实冗余；`ce-compound` 子 agent 通过 memory 单独生效；其它 6/7 CE skill sub-agent 的运行时承载层为零（Plan `2026-07-28-002` 的 R7 受控手工验收矩阵 `## Arrival matrix` 节记录每次受控跑结果）。
+
+- **受控验收**：本节不进入 CI；CE sub-agent 是否真接收护栏由 R7 受控手工验收矩阵定期验证。若护栏在某次 ce-brainstorm / ce-plan / ce-code-review / ce-simplify-code 代表调用中未生效，触发 Plan `2026-07-28-002` KTD9 事件驱动复核：CE 插件升级 / 平台调整 user-memory 跨 sub-agent 透传 / R7 矩阵连续 2 次 (i)+(ii) 双否。复核动作候选：fork 插件 / 加 skill prompt prefix / 重论双层冗余。
+
 - **项目背景**：Multica 是由 Multica-ai 团队开发的产品，官方 GitHub 仓库位于 https://github.com/multica-ai/multica 。当前目录是用户本地 self-host 的 Multica 服务实例，包含了用户的一些定制化改动。
 - **官方文档**：https://multica.ai/docs
 - **开发者规范**：对 Multica 进行定制化改动时，必须遵循 https://multica.ai/docs/developers/conventions 中的规范。
