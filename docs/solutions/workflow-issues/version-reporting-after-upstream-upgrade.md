@@ -1,7 +1,7 @@
 ---
 title: "Re-stamp both version strings on every upstream upgrade"
 date: 2026-07-22
-last_updated: 2026-07-22
+last_updated: 2026-07-28
 category: "workflow-issues"
 module: "self-host-upgrade"
 problem_type: "workflow_issue"
@@ -43,14 +43,25 @@ Two version-injection points freeze at stale or empty values unless explicitly r
 
 The reason this surfaces as a confusing "backend broken" symptom rather than a clear "you forgot to stamp" error is a deliberate silent-failure in the provenance customization (PR #5539, CLOSED by upstream 2026-07-16). The design never presents a commit hash, a `-dirty` marker, or the literal `dev` as a release baseline — it would rather show "unavailable" than lie about what is deployed. That is the right product call (an operator who acts on a fake baseline is worse off than one who sees "unavailable"), but it means a forgotten re-stamp looks identical to "the backend is down" even though every service is healthy.
 
-## Resolution
+## Resolution (launchd path automated after 2026-07-28; manual fallback remains)
 
-**Frontend — bump the env, then rebuild.**
+**Frontend — `bash scripts/selfhost/install.sh` on the launchd path**
+(2026-07-28 onward). install.sh derives `NEXT_PUBLIC_APP_VERSION` from
+`scripts/resolve-official-baseline.sh` and exports it so build-frontend.sh
+inherits the tag. The bare `.env` file no longer drives the version stamp,
+so a stale or missing `.env` does not over- or under-stamp the build.
+`MULTICA_TRUSTED_BASELINE` remains the only override when derivation is
+unavailable (offline hosts, shallow clones, fork tracking a different
+upstream). Verify with `curl -s http://localhost:8081/api/config |
+grep server_version` — the resolver fails closed if it cannot establish
+a baseline, so an unchanged tag is loud, not silent.
 
-1. Edit `.env` and set `NEXT_PUBLIC_APP_VERSION` to the target **clean** tag (e.g. `v0.4.6`). Use the plain `vX.Y.Z` tag, never `git describe` output.
-2. Run `pnpm build`. Because `NEXT_PUBLIC_*` is inlined at build time, the rebuild is what actually propagates the new literal into the bundle. A restart without a rebuild keeps serving the old literal.
-
-**Backend — stamp the `main.version` var, then run the binary (not `go run`).**
+**Backend — launched as `~/.multica/backend/server` by install.sh.**
+install.sh builds the binary with the same resolved tag via
+`go build -ldflags "-X main.version=$NEXT_PUBLIC_APP_VERSION"` (see
+`scripts/selfhost/install.sh`). For non-install.sh paths (e.g. `make
+build-prod` not used through launchd, or running `go run` for
+single-process dev), the manual two-step below remains the fallback:
 
 ```sh
 go build -C server -o bin/server \
@@ -76,10 +87,10 @@ After both re-stamps, all three observations converge on the target tag:
 
 ## Prevention
 
-- **Add "re-stamp both versions" to the upgrade checklist.** Every upstream-tag upgrade must (a) bump `NEXT_PUBLIC_APP_VERSION` in `.env` to the clean tag and `pnpm build`, and (b) build the backend with `-ldflags "-X main.version=<clean-tag>"` and run that binary. The upgrade-upstream skill's hard-facts and the `project-version-stamp-on-upgrade` memory capture this operationally; this doc is the written-down reasoning for why those steps are non-optional.
-- **Recognize the silent-failure signature.** "Help says Backend unavailable, but `/health` is 200 and the product works" means *forgotten re-stamp*, not *broken backend*. Before debugging the service, check `curl /api/config` for `server_version` and `git describe --tags`; if the former is absent and the latter has a `-N-g` suffix, the fix is a re-stamp, not an investigation.
-- **Do not weaken the sanitizer to make this "easier".** Mapping `dev` to a visible value would turn every unstamped dev build into a misleading baseline; the silent-failure is load-bearing. The right lever is the build/run command (always stamp, never `go run` in prod), not the sanitizer.
-- **There is no one-shot `make upgrade` target in this checkout.** Despite the provenance plan referencing one, the Makefile has no `upgrade` target (`make upgrade` → `No rule to make target`). `scripts/resolve-official-baseline.sh` is a bare helper that emits the clean tag to stdout; it is not wrapped by a Make target here. Re-stamping is the manual two-step above (or `BASELINE=$(scripts/resolve-official-baseline.sh)` + the `go build -ldflags` line).
+- **For the launchd path, the upgrade checklist is `git fetch && git checkout <tag> && bash scripts/selfhost/install.sh && curl /api/config` — no manual version edits.** install.sh derives VERSION from `resolve-official-baseline.sh` and exports `NEXT_PUBLIC_APP_VERSION` so both halves stamp from the same tag (see the doc's "Resolution" and `architecture-patterns/runtime-build-provenance.md`). The upgrade-upstream skill's hard-facts and the `project-version-stamp-on-upgrade` memory reflect this; this doc is the written-down reasoning for why the manual two-step below is now the non-launchd fallback, not the standard path.
+- **For non-launchd paths** (e.g. `make build-prod`, bare `go run`, custom deploy scripts that bypass `scripts/selfhost/install.sh`): stamp the backend with `go build -ldflags "-X main.version=<clean-tag>"` (where the clean tag comes from `BASELINE=$(scripts/resolve-official-baseline.sh)`), then build the frontend with `NEXT_PUBLIC_APP_VERSION=$TAG pnpm --filter @multica/web build`. The pattern survives whenever install.sh isn't the entry point.
+- **Recognize the silent-failure signature when using a hardened resolver:** "Help says Backend unavailable, but `/health` is 200 and the product works" no longer means *forgotten re-stamp*. It now means the resolver failed (no upstream-verified tag reachable, or `MULTICA_UPSTREAM_REMOTE` unreachable) and install.sh aborted under `set -euo pipefail`. Fix: set `MULTICA_TRUSTED_BASELINE=vX.Y.Z` to supply an explicit trusted baseline.
+- **Do not weaken the sanitizer to "make this work".** Mapping `dev` to a visible value would turn every unstamped dev build into a misleading baseline; the silent-failure was load-bearing for the old `v0.4.6-fallback` behavior and it remains load-bearing today (the resolver is fail-closed). The right lever is the resolver invocation (always call it, never `go run` in prod), not the sanitizer.
 - **Under launchd supervision, the stamped binary is what keeps getting re-executed.** The backend wrapper `scripts/selfhost/run-backend.sh` `exec`s `~/.multica/backend/server`, so `scripts/selfhost/install.sh` must build that binary with `-ldflags` (calling `scripts/resolve-official-baseline.sh` for the clean tag). If the wrapper execs an unstamped binary, launchd's crash-recovery keeps restarting an unstamped server, and the "Backend unavailable" silent-failure persists under supervision exactly as it does under a hand-run `go run` (see `docs/solutions/runtime-errors/caddy-standalone-launchd.md`).
 
 ## Related
