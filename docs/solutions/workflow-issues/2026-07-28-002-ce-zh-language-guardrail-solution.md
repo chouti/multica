@@ -78,9 +78,11 @@ tags: [ce, language, guardrail, conventions, agent-output]
 
 | 日期 | 代表 skill | (i) sub-agent 上下文包含 CLAUDE.md 节选 / feedback_zh_guardrails 节选 | (ii) 产出语言 | 结论 |
 |---|---|---|---|---|
-| 2026-MM-DD | ce-brainstorm |  |  |  |
-| 2026-MM-DD | ce-plan |  |  |  |
-| 2026-MM-DD | ce-code-review |  |  |  |
-| 2026-MM-DD | ce-simplify-code |  |  |  |
+| 2026-07-28 | ce-brainstorm | ✓ Sanity check 确认两条都加载；`/ce-brainstorm` 走正常 skill 路径 | 中文主体（`★ Insight` 与 GFM task list 形态由 system 层注入；用户回复语言=中文），R4 豁免（emoji `⚠️` / ASCII 标签）保留 | 护栏双向生效；触发后续 KTD1 描述"覆盖域声明"在主 agent + sub-agent 一致；ce-compound 行为见单独说明 |
+| 2026-07-28 | ce-plan | ✓ 同上 | 中文主体（确认路径：`/ce-plan` 走 confirmation gate 路径）；`enable_plugins` / `enabledPlugins` / `INDEX.md` 等术语保留英文（R4 豁免） | 同上 |
+| 2026-07-28 | ce-code-review | ✓ | 中文主体（结构 review）；表内 ✓/✗/△ 与 ID 引用保留；提议 6 项 simplify 中 #2 与 #5 是 doc-only 修，不影响护栏 | 同上；simplify 提议与本 Arrival matrix 不冲突（可后续迭代） |
+| 2026-07-28 | ce-simplify-code | ✓ | 中文主体（reuse / quality / efficiency 三轴 → markdown 映射）；建议 1 (承载点矩阵跨表副本) 已在 plan R6 块显式说明，不算缺陷 | 同上；建议 1 是 ce-simplify-code 的 lateral insight，采纳与否独立于本 matrix |
+
+合成判断：本机 proxy env 下 4/4 sub-agent 都同时落到 CLAUDE.md + auto-memory 上下文，输出语言全部满足 R1/R4。"**双层冗余在主 agent + CE skill sub-agent**"这一条**受控条件下成立**；ce-compound 在 SKILL.md:103-118 的 forward 行为需单独验证（见下）。
 
 ce-compound 单独行为（不入 4 行矩阵）：`SKILL.md:103-118` 把 `feedback_zh_guardrails.md` 的 frontmatter.description 当 takeaway forward 到 Context Analyzer + Solution Extractor；memory-only 验证；这是双层冗余在 ce-compound 上的唯一一条真实生效层。
