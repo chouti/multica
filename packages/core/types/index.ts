@@ -55,6 +55,8 @@ export type {
   DashboardUsageByAgent,
   DashboardAgentRunTime,
   DashboardRunTimeDaily,
+  DashboardFailureDaily,
+  DashboardFailureByAgent,
   RuntimeUpdate,
   RuntimeUpdateStatus,
   RuntimeModel,
@@ -137,6 +139,8 @@ export type {
   GitHubPullRequestMergeStateStatus,
   GitHubPullRequestState,
   ListGitHubInstallationsResponse,
+  GitHubRepository,
+  ListGitHubRepositoriesResponse,
   GitHubConnectResponse,
 } from "./github";
 export type {
