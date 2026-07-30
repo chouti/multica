@@ -156,11 +156,19 @@ is a no-op; a malformed UUID is rejected at the request boundary.
     [@all](mention://all/all)
 
 It addresses everyone on the issue. It does NOT make any specific agent run.
-And it is special at trigger time: in `commentMentionsOthersButNotAssignee`
-(`server/internal/handler/comment.go`), a comment that carries an `@all`
-mention is treated as a broadcast that SUPPRESSES the issue assignee's
-automatic on-comment trigger. Use `@all` to announce, not to request work from
-the assignee.
+And it is special at trigger time: a comment that carries an `@all` mention is
+treated as a broadcast that SUPPRESSES the issue assignee's automatic
+on-comment trigger (and the other implicit routing fallbacks — thread parent /
+conversation owner). Use `@all` to announce, not to request work from the
+assignee.
+
+`@all` only suppresses those IMPLICIT routes. An EXPLICIT `@agent` / `@squad`
+mention in the same comment still fires normally (MUL-5411): a comment reading
+`[@all](mention://all/all) heads up — [@Preflight](mention://agent/<uuid>)
+please take this` enqueues Preflight and nobody else. Explicit mentions win over
+the broadcast; see `computeCommentAgentTriggers` in
+`server/internal/handler/comment.go`, where the explicit-mention branch is
+evaluated BEFORE the `@all` short-circuit.
 
 ## What does NOT happen (so the result doesn't surprise you)
 
@@ -172,7 +180,10 @@ These are all silent no-ops — no error, no run:
 - **A hex-ish but wrong UUID.** A well-formed-looking UUID that no entity owns
   DOES parse, then no-ops at lookup: the workspace-scoped query finds no agent
   and the loop `continue`s. Same agent-visible result (nothing fires), but the
-  mechanism is the lookup miss, not a parse failure.
+  mechanism is the lookup miss, not a parse failure. An id that matches the
+  pattern but is NOT a valid UUID at all (`mention://agent/-`) is rejected by
+  the id parser itself and reported as a blocked mention with the same
+  enumeration-safe reason code — never an error response.
 - **An undesignated `@skill` mention.** A `[@Bot](mention://skill/<id>)` with
   no entry (or an empty list) in `skill_mention_agents` for that skill id is
   dropped silently — the parser matched, the link renders, no run is enqueued.

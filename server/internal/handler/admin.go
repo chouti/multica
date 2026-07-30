@@ -174,7 +174,7 @@ func (h *Handler) AdminUpdateUser(w http.ResponseWriter, r *http.Request) {
 		"new_name", updated.Name,
 	)
 
-	writeJSON(w, http.StatusOK, userToResponse(updated))
+	writeJSON(w, http.StatusOK, h.userToResponse(updated))
 }
 
 // envPositiveIntDefault parses a query string as a positive integer, returning
