@@ -58,7 +58,7 @@ export function IssuesPage() {
     <div className="flex flex-1 min-h-0 flex-col">
       <PageHeader className="gap-2">
         <ListTodo className="h-4 w-4 text-muted-foreground" />
-        <h1 className="text-sm font-medium">{t(($) => $.page.breadcrumb_title)}</h1>
+        <h1 className="text-body font-medium">{t(($) => $.page.breadcrumb_title)}</h1>
       </PageHeader>
 
       <IssueSurface
