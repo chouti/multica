@@ -60,6 +60,19 @@ The three-state model describing who can invoke (trigger) an agent: **workspace*
 
 ---
 
+## Principles
+
+### Script as Source of Truth
+The principle that any value (metric, count, classification, judgment) the spec promises must be produced deterministically by a script or reproducible component. The agent only locates, copies, sequences, and presents — it does not re-derive business values. When the deterministic source has no value for a field, the deliverable shows `—` and surfaces the gap rather than letting the agent improvise. The corollary operators hit: a script that is silent on a promised field produces drift, since the agent has no choice but to invent to complete the task; a rule that says "copy from the script" without a script value produces blanks or fabrications, defeating the rule. See `docs/solutions/workflow-issues/agent-script-as-source-of-truth.md` for the day-by-day fix pattern and the failure table.
+
+### Deterministic vs Self-Judgment
+The architectural distinction between a value derived from a defined algorithm (deterministic, reproducible across reruns) and a value produced by the agent's own LLM judgment (self-judgment, varies with context, path, and rerun state). The boundary is the operator's defense against drift: anything that a downstream reader or auditor could ask "why this number?" about must live on the deterministic side; only free-form narrative summaries whose wording is allowed to vary belong on the self-judgment side. See `docs/solutions/workflow-issues/agent-script-as-source-of-truth.md` for the worked example where this distinction turned noisy reports into stable ones.
+
+### Edit Layer vs Read Layer
+The architectural distinction between *where a change is written* and *where a runtime reads from*. In multi-replica / multi-runtime systems the two can drift silently — Hermes-local skill copies vs Multica-workspace skill copies, Git branches vs deployed tags, Docker images vs running containers, K8s namespaces vs production routing. Edits to the wrong layer produce no error and no warning; the runtime simply keeps reading its own copy. The discipline is to verify the read layer *before* editing, then edit that same layer, then verify the runtime's view moved. See `docs/solutions/integration-issues/autopilot-reads-workspace-skill-not-hermes-local.md` for the protocol and the 2026-07-29 YUP-470 incident where 17 turns of "已修复" had no autopilot-visible effect.
+
+---
+
 ## Relationships
 
 - A **Runtime** exposes many **Skills**, each with a **Root** classification.
@@ -68,3 +81,5 @@ The three-state model describing who can invoke (trigger) an agent: **workspace*
 - **Branch (UI)** determines which rendering path is shown based on skill count in a list dialog.
 - An **Official Release Baseline** identifies the upstream release context of a running backend or frontend artifact without asserting that the artifact is an unmodified official image.
 - A **Member** is a global human id joined to one workspace, so a member reference is workspace-portable; an **Agent** is scoped to one workspace, so an agent reference is workspace-local and must be re-localized on copy.
+- **Script as Source of Truth** and **Deterministic vs Self-Judgment** are the same boundary seen from two sides: the principle names the discipline the spec must enforce, the distinction names the line the agent must not cross.
+- **Edit Layer vs Read Layer** is the orthogonal discipline for change propagation: the layer the operator edits must be the same layer the runtime reads, and verification must compare `updated_at` before and after. Skipping this discipline produces silent drift even when the rule itself is correct.
