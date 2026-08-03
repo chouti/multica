@@ -164,7 +164,7 @@ func triggerSkillMentions(t *testing.T, ctx context.Context, fx skillMentionFixt
 	}
 	// Zero-value parent / suppress list / originator: the fixture's author is a
 	// member, so originator gating keys on the member id directly.
-	return testHandler.triggerTasksForComment(ctx, fx.Issue, comment, nil, "member", testUserID, "", nil, skillAgents)
+	return testHandler.triggerTasksForComment(ctx, fx.Issue, comment, nil, "member", testUserID, "", "", nil, skillAgents)
 }
 
 // countAgentSkillBindingsFor reports how many agent_skill rows link the agent to
@@ -709,7 +709,7 @@ func TestEnqueueSkillMention_DesignatedSameAsReplyParentProducesOneTask(t *testi
 
 	// Drive the create path directly so the parent relationship is honored
 	// (the existing triggerSkillMentions helper passes nil parent).
-	_ = testHandler.triggerTasksForComment(ctx, issue, comment, &parent, "member", testUserID, "", nil, map[string][]pgtype.UUID{
+	_ = testHandler.triggerTasksForComment(ctx, issue, comment, &parent, "member", testUserID, "", "", nil, map[string][]pgtype.UUID{
 		fx.SkillID: {parseUUIDForTest(t, fx.OtherAgentID)},
 	})
 
@@ -855,7 +855,7 @@ func TestEnqueueSkillMention_ImplicitAndDesignatedSameAgent_BindsDespiteDedup(t 
 		t.Fatalf("load comment: %v", err)
 	}
 
-	_ = testHandler.triggerTasksForComment(ctx, issue, comment, &parent, "member", testUserID, "", nil, map[string][]pgtype.UUID{
+	_ = testHandler.triggerTasksForComment(ctx, issue, comment, &parent, "member", testUserID, "", "", nil, map[string][]pgtype.UUID{
 		fx.SkillID: {parseUUIDForTest(t, fx.OtherAgentID)},
 	})
 
@@ -899,7 +899,7 @@ func TestEnqueueSkillMention_SuppressedDesignatedAgentStillBound(t *testing.T) {
 	}
 
 	suppress := []pgtype.UUID{parseUUIDForTest(t, fx.OtherAgentID)}
-	_ = testHandler.triggerTasksForComment(ctx, issue, comment, nil, "member", testUserID, "", suppress, map[string][]pgtype.UUID{
+	_ = testHandler.triggerTasksForComment(ctx, issue, comment, nil, "member", testUserID, "", "", suppress, map[string][]pgtype.UUID{
 		fx.SkillID: {parseUUIDForTest(t, fx.OtherAgentID)},
 	})
 

@@ -43,6 +43,7 @@ import type {
   IssueProperty,
   IssueTableFacetSpec,
   IssueTableFacetsResponse,
+  WorkingAgentSummary,
 } from "@multica/core/types";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { ActorAvatar } from "../../common/actor-avatar";
@@ -772,6 +773,7 @@ export function ViewRefreshIndicator({ active }: { active: boolean }) {
 
 export function IssuesHeader({
   scopedIssues,
+  workingAgents,
   allowGantt = false,
   dateFilter = null,
   onDateFilterChange,
@@ -781,6 +783,9 @@ export function IssuesHeader({
   onTableFacetChange,
 }: {
   scopedIssues: Issue[];
+  /** See IssueSurfaceController.workingAgents — the surface-scoped projection
+   *  behind the agents-working chip. */
+  workingAgents: WorkingAgentSummary[] | undefined;
   allowGantt?: boolean;
   dateFilter?: IssueDateFilter | null;
   onDateFilterChange?: (filter: IssueDateFilter | null) => void;
@@ -875,6 +880,7 @@ export function IssuesHeader({
           <WorkspaceAgentWorkingChip
             value={agentRunningFilter}
             onToggle={toggleAgentRunningFilter}
+            agents={workingAgents}
           />
           <IssueDisplayControls
             scopedIssues={scopedIssues}

@@ -5,6 +5,7 @@ import type {
   Issue,
   IssueTableFacetSpec,
   IssueTableFacetsResponse,
+  WorkingAgentSummary,
 } from "@multica/core/types";
 import { useIssuesScopeStore } from "@multica/core/issues/stores/issues-scope-store";
 import { useViewStore } from "@multica/core/issues/stores/view-store-context";
@@ -16,12 +17,14 @@ import { Button } from "@multica/ui/components/ui/button";
 
 function IssuesSurfaceHeader({
   issues,
+  workingAgents,
   isRefreshing,
   facetCountsExact,
   tableFacetCounts,
   onTableFacetChange,
 }: {
   issues: Issue[];
+  workingAgents: WorkingAgentSummary[] | undefined;
   isRefreshing: boolean;
   facetCountsExact: boolean;
   tableFacetCounts?: IssueTableFacetsResponse;
@@ -33,6 +36,7 @@ function IssuesSurfaceHeader({
   return (
     <IssuesHeader
       scopedIssues={issues}
+      workingAgents={workingAgents}
       dateFilter={dateFilter}
       onDateFilterChange={setDateFilter}
       isRefreshing={isRefreshing}
@@ -68,6 +72,7 @@ export function IssuesPage() {
         renderHeader={({ controller }) => (
           <IssuesSurfaceHeader
             issues={controller.surfaceIssues}
+            workingAgents={controller.workingAgents}
             isRefreshing={controller.isRefreshing}
             facetCountsExact={controller.facetCountsExact}
             tableFacetCounts={controller.tableFacetCounts}
@@ -96,7 +101,7 @@ function IssuesEmptyState({
   const showArchivedHint = archivedCount > 0;
   return (
     <div className="flex flex-1 min-h-0 flex-col items-center justify-center gap-2 text-muted-foreground">
-      <ListTodo className="h-10 w-10 text-muted-foreground/40" />
+      <ListTodo className="h-10 w-10 text-faint-foreground" />
       <p className="text-body">{t(($) => $.page.empty_title)}</p>
       <p className="text-caption">{t(($) => $.page.empty_hint)}</p>
       {showArchivedHint && (

@@ -1,6 +1,6 @@
 ---
 name: multica-mentioning
-description: "Use when an issue comment needs to @mention someone — link to a person, trigger another agent, hand work to a squad, broadcast with @all, or designate an agent via @skill. Documents the verified mention contract: how a mention link is built from a real UUID, the five mention types and exactly what each one enqueues (agent → a run for that agent, squad → a run for the squad leader, member and issue → a rendered link with NO run, skill → a run ONLY for agents the frontend EXPLICITLY designated in `skill_mention_agents`; undesignated skill mention = silent no-op), comment preview/suppression, the @all broadcast and assignee-trigger suppression, and the silent no-op cases (bad name, bad UUID, undesignated @skill, already-pending, archived, inaccessible). This skill is the backend contract only, traced to server/internal/util/mention.go and server/internal/handler/comment.go."
+description: "Use when an issue comment needs to @mention someone — link to a person, trigger another agent, hand work to a squad, broadcast with @all, or designate an agent via @skill. Documents the verified mention contract: how a mention link is built from a real UUID, what each mention type enqueues (agent → a run for that agent, squad → a run for the squad leader, member and issue → a rendered link with NO run, skill → a run ONLY for agents the frontend EXPLICITLY designated in `skill_mention_agents`; undesignated @skill = silent no-op), and the guard outcomes for a parsed mention (blocked with an enumeration-safe reason_code, coalesced/deferred into a pending task, or a true silent no-op). Whether to mention at all is covered by the runtime brief, not here. This skill is the backend contract only, traced to server/internal/util/mention.go and server/internal/handler/comment.go."
 user-invocable: false
 allowed-tools: Bash(multica *)
 ---
@@ -44,6 +44,15 @@ the mention renders, and the backend does nothing with it. This is the same
 silent contract a `member` mention uses, but for a different reason: members
 never had a runner, while skill mentions ARE routed to agents — just not by
 the backend inferring one from a binding table.
+
+One `mention://` form deliberately sits OUTSIDE this parser:
+`[Label](mention://project/<uuid>)`. `project` is absent from the type group
+above, so the backend never parses it and it can enqueue nothing — it is a
+render-only link every client makes navigable (a chip on web and desktop, an
+ordinary link that opens the project on tap on mobile). That is the whole point:
+a project reference should never be able to start a run. Use it freely to point
+at a project (see the multica-projects-and-resources skill); everything else in
+this document is about the four types (plus `all`) the parser does recognize.
 
 ## Step 1 — look up the UUID with `--output json`
 
@@ -172,18 +181,30 @@ evaluated BEFORE the `@all` short-circuit.
 
 ## What does NOT happen (so the result doesn't surprise you)
 
-These are all silent no-ops — no error, no run:
+None of these start a fresh run, and none produce an error response — but they
+are three different things, and the response tells you which. A mention that
+never parsed is a truly silent no-op. One that parsed and was refused comes back
+in `trigger_outcomes` as `status: "blocked"` with a `reason_code`. One whose
+target is already busy comes back `coalesced` or `deferred`: no second run, but
+your comment IS folded into the task that is already running, so it still gets
+read. Read that array after posting — it is the only place any of this shows up.
 
 - **A name where a UUID belongs.** `mention://member/Alice` is dead. The id
   group accepts only hex+dashes or `all`; the non-hex letters in a typical name
   make the whole pattern fail to match, so the parser returns nothing.
 - **A hex-ish but wrong UUID.** A well-formed-looking UUID that no entity owns
   DOES parse, then no-ops at lookup: the workspace-scoped query finds no agent
-  and the loop `continue`s. Same agent-visible result (nothing fires), but the
-  mechanism is the lookup miss, not a parse failure. An id that matches the
-  pattern but is NOT a valid UUID at all (`mention://agent/-`) is rejected by
-  the id parser itself and reported as a blocked mention with the same
-  enumeration-safe reason code — never an error response.
+  and the mention is reported blocked with `invocation_not_allowed`. That code
+  is deliberately ambiguous — **a typo'd UUID and a genuine permission denial
+  look identical on purpose**, because the id you typed could name a private
+  agent in another workspace and the reason must not confirm that it exists.
+  **So when you see `invocation_not_allowed`, check the UUID against the live
+  roster BEFORE you touch any visibility or invocation setting** (MUL-5548);
+  `multica squad member list <squad-id> --output json` returns the `member_id`
+  to build the mention from. An id that matches the pattern but is NOT a valid
+  UUID at all (`mention://agent/-`) is rejected by the id parser and blocked
+  with `target_unavailable` instead — a non-UUID names no entity anywhere, so
+  it conceals nothing. Neither case is ever an error response.
 - **An undesignated `@skill` mention.** A `[@Bot](mention://skill/<id>)` with
   no entry (or an empty list) in `skill_mention_agents` for that skill id is
   dropped silently — the parser matched, the link renders, no run is enqueued.
@@ -192,18 +213,26 @@ These are all silent no-ops — no error, no run:
   runners, they just weren't named for this comment. So this is the only
   silent no-op a `@skill` mention can produce, and it is by design: the
   backend never reverse-looks-up the binding table to guess an agent.
-- **An already-pending task.** Even a correct `@agent`/`@squad` is skipped when
-  the target already has a pending task on this issue
-  (`HasPendingTaskForIssueAndAgent` → `continue`). Edit preview is the only
-  exception: `editing_comment_id` ignores pending tasks from the same comment
-  being edited, because save cancels those old tasks before it re-computes
-  triggers. It is still comment-scoped, not an agent-wide bypass.
-- **An archived agent**, or a squad whose leader is archived: skipped
-  (`RuntimeID` invalid or `ArchivedAt` set).
-- **A private agent you cannot access:** skipped — the mention path gates on
-  `canAccessPrivateAgent` directly for both `@agent` and `@squad` (the
-  `canEnqueueSquadLeader` wrapper is the squad assignment/promote path, not this
-  one; the child-done wake is ungated — see the multica-squads skill).
+- **An already-pending task.** Even a correct `@agent`/`@squad` starts no second
+  run when the target already has a pending task on this issue
+  (`HasPendingTaskForIssueAndAgent`). This is a fold, not a drop: the comment
+  merges into that task and the outcome is `coalesced` (same reviewed head) or
+  `deferred` (different head) — do NOT re-post it as "the mention didn't work".
+  Edit preview is the only exception: `editing_comment_id` ignores pending tasks
+  from the same comment being edited, because save cancels those old tasks
+  before it re-computes triggers. It is still comment-scoped, not an agent-wide
+  bypass.
+- **An archived agent, or one with no runtime bound** (likewise a squad whose
+  leader is): blocked with `target_unavailable` and `runtime_offline`
+  respectively. Both are checked only AFTER the invoke gate, so a caller who may
+  not invoke the target never learns its state.
+- **A private agent you cannot invoke:** blocked — the mention path gates on
+  `canInvokeAgent` for both `@agent` and `@squad`. That is the *run* gate, not
+  the *see* gate: since MUL-3963 a workspace admin who can open a private agent
+  in the UI still may not trigger it, so being able to view the target says
+  nothing about being able to mention it. (The `canEnqueueSquadLeader` wrapper
+  is the squad assignment/promote path, not this one; the child-done wake is
+  ungated — see the multica-squads skill.)
 
 One nuance for automation (MUL-4857): when an UNATTRIBUTED autopilot run (a
 schedule/webhook dispatch has no human originator, so the A2A gate has no human
