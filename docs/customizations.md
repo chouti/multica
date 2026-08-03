@@ -18,7 +18,7 @@ tags: [local-customizations, upstream-pr, ledger, merge-strategy, self-hosted, d
 
 > **This is a living document.** Update it whenever you open/close an upstream PR, land a new local customization, or complete an upstream merge. It is the per-customization companion to the merge workflow in `docs/solutions/workflow-issues/safe-upstream-upgrade-with-local-customizations.md` (which covers the *mechanics* of one upgrade; this file tracks *what* you are carrying across all upgrades).
 
-*Audit 2026-08-03:* **✅ v0.4.15 → v0.4.16 upgrade EXECUTED 2026-08-03** (merge `0e8a64a63`, base now `v0.4.16`); **6 手动冲突 + 0 rerere + 1 go-build 语义修复（Strategy D 双向改签名）+ source-map 全量重钉**; **16 个新迁移（235-250，quick-actions+索引）零撞号，索引全 CONCURRENTLY**；后端零文本冲突。PR **#5199 状态翻转 OPEN→CLOSED**（upstream Bohan-J 2026-07-31 关闭，未 merged → Own forever）。Per-file strategy, verified negative claims (25: 24 confirmed + 1 refuted), and actuals-vs-plan live in `docs/upgrades/v0.4.16-plan.md` (see "Last upgrade").
+*Audit 2026-08-03:* **✅ v0.4.15 → v0.4.16 upgrade EXECUTED 2026-08-03** (merge `2912c6a32`, base now `v0.4.16`); **6 手动冲突 + 0 rerere + 1 go-build 语义修复（Strategy D 双向改签名）+ source-map 全量重钉**; **16 个新迁移（235-250，quick-actions+索引）零撞号，索引全 CONCURRENTLY**；后端零文本冲突。PR **#5199 状态翻转 OPEN→CLOSED**（upstream Bohan-J 2026-07-31 关闭，未 merged → Own forever）。Per-file strategy, verified negative claims (25: 24 confirmed + 1 refuted), and actuals-vs-plan live in `docs/upgrades/v0.4.16-plan.md` (see "Last upgrade").
 
 ## Why this ledger exists
 
@@ -128,7 +128,7 @@ git diff <tag>..HEAD -- <path>   # expect only deliberate deltas, not redundant 
 
 ## Last upgrade — v0.4.15 → v0.4.16 (EXECUTED 2026-08-03)
 
-✅ **EXECUTED 2026-08-03** — merge `0e8a64a63`, base now `v0.4.16`. Clean merge-base `v0.4.15`, 40 upstream commits, 476 files. **6 手动冲突 + 0 rerere 自动吸收 + 1 go-build 语义修复（Strategy D 双向改签名）+ source-map 全量重钉**。
+✅ **EXECUTED 2026-08-03** — merge `2912c6a32`, base now `v0.4.16`. Clean merge-base `v0.4.15`, 40 upstream commits, 476 files. **6 手动冲突 + 0 rerere 自动吸收 + 1 go-build 语义修复（Strategy D 双向改签名）+ source-map 全量重钉**。
 
 Resolved: **rich-content.tsx**（C）取 upstream `IdentifierIssueMentionLink`+`fallback`（MUL-5499 bare-URL-chip），保 fork `mentionId` 变量 + actor/skill chip dispatch；**comment-input.tsx**（B）editor 双 prop 并列 `skillMentionContext`（#5346）+ `quickActionMenu`（MUL-5465）；**issues-page.tsx**（C）取 fork `IssuesEmptyState` archived 空态重构（#6106）+ re-apply upstream MUL-5580 icon tone（`text-faint-foreground`，语义丢失点）；**client.ts**（B）import 并列 `EMPTY_BATCH_IMPORT_RESPONSE`+`EMPTY_CHAT_MESSAGE_LIST`；**builtin_skills/multica-mentioning/SKILL.md**（B）upstream 新骨架（MUL-5548 reason_code + coalesced/deferred + MUL-3963 canInvokeAgent）+ 回植 fork @skill 契约（Step 3 + undesignated-@skill silent no-op）；**mentioning-source-map.md**（B）fork `skill|project` ValidMentionTypes regex + **全量重钉 comment.go 行号** + 修符号名。
 
@@ -140,7 +140,7 @@ Resolved: **rich-content.tsx**（C）取 upstream `IdentifierIssueMentionLink`+`
 
 **Design-system 盲区零返工：** MUL-5452 透明度重构（152 处 `text-muted-foreground/N`→实色 token + 新 `--faint-foreground` + 新守卫 `text-contrast.test.ts`）实测 fork 独有文件**零违规**；用户工作区已先发迁移 type-scale（commit `a55c95c4c`）→ 守卫首跑即绿，无 v0.4.15 式返工。
 
-**Deploy (Phase 6) executed:** merge commit `0e8a64a63` 先落（`git describe --abbrev=0`→v0.4.16）；pg_dump 备份 pg17 `~/multica-backups/v0.4.16-pre-migrate-20260803-094826.dump`（44M）；migrate up 16 应用全 skip 既有；版本 re-stamp 前端 `.env NEXT_PUBLIC_APP_VERSION=v0.4.16` + `install.sh` 全量 rebuild + ldflag backend + reload plists；health check backend `/healthz` 200、frontend `/` 200、`/api/config server_version=v0.4.16`。
+**Deploy (Phase 6) executed:** merge commit `2912c6a32` 先落（`git describe --abbrev=0`→v0.4.16）；pg_dump 备份 pg17 `~/multica-backups/v0.4.16-pre-migrate-20260803-094826.dump`（44M）；migrate up 16 应用全 skip 既有；版本 re-stamp 前端 `.env NEXT_PUBLIC_APP_VERSION=v0.4.16` + `install.sh` 全量 rebuild + ldflag backend + reload plists；health check backend `/healthz` 200、frontend `/` 200、`/api/config server_version=v0.4.16`。
 
 **Calibration (actuals vs audit prediction):** merge-tree 预测 6 冲突 → **实际 6**（连续第三次文本预测命中）；rerere 本轮未吸收（全新模式）但记录 6 resolution。新变量：**Strategy D 双向改签名**（go build 兜底）+ source-map 全量重钉（清偿多轮符号名/行号陈旧债务）。
 
