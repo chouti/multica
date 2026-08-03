@@ -1159,7 +1159,7 @@ export function RuntimeLocalSkillImportPanel({
 
             {visibleGroups.map((group) => (
               <div key={group.root} className="space-y-1">
-                <div className="px-1 text-xs font-medium text-muted-foreground">
+                <div className="px-1 text-caption font-medium text-muted-foreground">
                   {group.heading}
                 </div>
                 {group.skills.map((s) => (

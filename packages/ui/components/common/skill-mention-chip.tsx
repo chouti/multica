@@ -39,7 +39,7 @@ export interface SkillMentionChipProps {
 }
 
 const BASE_CLASS =
-  "skill-mention-chip inline-flex align-middle min-w-0 items-center gap-1 rounded-full border px-1.5 py-0.5 text-xs font-medium bg-violet-100 text-violet-700 border-violet-200 hover:bg-violet-200 transition-colors dark:bg-violet-900/30 dark:text-violet-300 dark:border-violet-700 dark:hover:bg-violet-900/40";
+  "skill-mention-chip inline-flex align-middle min-w-0 items-center gap-1 rounded-full border px-1.5 py-0.5 text-caption font-medium bg-violet-100 text-violet-700 border-violet-200 hover:bg-violet-200 transition-colors dark:bg-violet-900/30 dark:text-violet-300 dark:border-violet-700 dark:hover:bg-violet-900/40";
 
 const ICON_SIZE = 12;
 
@@ -73,7 +73,7 @@ export function SkillMentionChip({
       {typeof designatedCount === "number" && designatedCount > 0 && (
         <span
           data-testid="skill-mention-count"
-          className="inline-flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full bg-violet-200 px-1 text-[10px] font-semibold leading-none text-violet-800 dark:bg-violet-800/60 dark:text-violet-100"
+          className="inline-flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full bg-violet-200 px-1 text-micro font-semibold leading-none text-violet-800 dark:bg-violet-800/60 dark:text-violet-100"
         >
           {designatedCount}
         </span>

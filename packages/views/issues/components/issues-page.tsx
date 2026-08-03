@@ -97,13 +97,13 @@ function IssuesEmptyState({
   return (
     <div className="flex flex-1 min-h-0 flex-col items-center justify-center gap-2 text-muted-foreground">
       <ListTodo className="h-10 w-10 text-muted-foreground/40" />
-      <p className="text-sm">{t(($) => $.page.empty_title)}</p>
-      <p className="text-xs">{t(($) => $.page.empty_hint)}</p>
+      <p className="text-body">{t(($) => $.page.empty_title)}</p>
+      <p className="text-caption">{t(($) => $.page.empty_hint)}</p>
       {showArchivedHint && (
         <Button
           variant="outline"
           size="sm"
-          className="mt-1 gap-1.5 text-xs"
+          className="mt-1 gap-1.5 text-caption"
           onClick={() => setStatusFilters(["archived"])}
         >
           <Archive className="size-3.5" />

@@ -144,7 +144,7 @@ export function SkillProfileCard({
         </div>
         <div className="min-w-0 flex-1 overflow-hidden">
           {resolvedName ? (
-            <p className="truncate text-sm font-semibold">{resolvedName}</p>
+            <p className="truncate text-body font-semibold">{resolvedName}</p>
           ) : (
             // Edge case: prop is empty AND detail query hasn't returned yet.
             // Shows a skeleton for the name rather than falling back to the
@@ -152,7 +152,7 @@ export function SkillProfileCard({
             <Skeleton className="mb-1 h-4 w-3/4" />
           )}
           {resolvedDescription && (
-            <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">
+            <p className="mt-0.5 line-clamp-2 text-caption text-muted-foreground">
               {resolvedDescription}
             </p>
           )}
@@ -162,7 +162,7 @@ export function SkillProfileCard({
       {/* Promoted frontmatter — small subset of high-signal fields. Each
           row is a single line (line-clamp-1) so the card stays compact. */}
       {promotedFm.length > 0 && (
-        <dl className="flex flex-col gap-0.5 overflow-hidden border-t pt-2 text-[11px]">
+        <dl className="flex flex-col gap-0.5 overflow-hidden border-t pt-2 text-micro">
           {promotedFm.slice(0, 3).map(([key, value]) => (
             <div
               key={key}
@@ -178,7 +178,7 @@ export function SkillProfileCard({
             <button
               type="button"
               onClick={() => setExpanded((v) => !v)}
-              className="mt-1 inline-flex items-center gap-1 self-start rounded text-[11px] font-medium text-violet-600 hover:text-violet-700 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 dark:text-violet-400 dark:hover:text-violet-300"
+              className="mt-1 inline-flex items-center gap-1 self-start rounded text-micro font-medium text-violet-600 hover:text-violet-700 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 dark:text-violet-400 dark:hover:text-violet-300"
               aria-expanded={expanded}
             >
               {expanded ? (
@@ -203,7 +203,7 @@ export function SkillProfileCard({
           the disclosure button is expanded. We don't scroll inside a hover
           card; the skill detail page is the place for long bodies. */}
       {expanded && additionalFm.length > 0 && (
-        <dl className="flex flex-col gap-0.5 overflow-hidden border-t pt-2 text-[11px]">
+        <dl className="flex flex-col gap-0.5 overflow-hidden border-t pt-2 text-micro">
           {additionalFm.map(([key, value]) => (
             <div
               key={key}
@@ -219,7 +219,7 @@ export function SkillProfileCard({
       )}
 
       {/* Bound agents */}
-      <div className="flex min-w-0 flex-col gap-1 overflow-hidden border-t pt-2 text-xs">
+      <div className="flex min-w-0 flex-col gap-1 overflow-hidden border-t pt-2 text-caption">
         <span className="truncate text-muted-foreground">{agentsLabel}</span>
         {agentsLoading && boundAgents.length === 0 ? (
           <div className="flex flex-wrap gap-1 overflow-hidden">
@@ -232,7 +232,7 @@ export function SkillProfileCard({
               <AppLink
                 key={agent.id}
                 href={p.agentDetail(agent.id)}
-                className="max-w-28 truncate rounded-md bg-muted px-1.5 py-0.5 text-[11px] font-medium text-foreground hover:bg-accent transition-colors"
+                className="max-w-28 truncate rounded-md bg-muted px-1.5 py-0.5 text-micro font-medium text-foreground hover:bg-accent transition-colors"
               >
                 {agent.name}
               </AppLink>
@@ -246,7 +246,7 @@ export function SkillProfileCard({
       <div className="flex justify-end overflow-hidden">
         <AppLink
           href={p.skillDetail(skillId)}
-          className="shrink-0 text-[11px] font-medium text-violet-600 hover:text-violet-700 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 dark:text-violet-400 dark:hover:text-violet-300"
+          className="shrink-0 text-micro font-medium text-violet-600 hover:text-violet-700 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 dark:text-violet-400 dark:hover:text-violet-300"
         >
           {t(($) => $.mention.skill_view_full)}
         </AppLink>

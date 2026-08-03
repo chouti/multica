@@ -43,7 +43,7 @@ export interface ActorMentionChipProps {
 }
 
 const BASE_CLASS =
-  "actor-mention-chip inline-flex align-middle min-w-0 items-center gap-1 rounded-full border px-1.5 py-0.5 text-xs font-medium";
+  "actor-mention-chip inline-flex align-middle min-w-0 items-center gap-1 rounded-full border px-1.5 py-0.5 text-caption font-medium";
 
 // Base background + border + hover tint, all keyed by type. Hover layers a
 // deeper tint so R12's "background transitions to a slightly deeper tint" is

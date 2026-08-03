@@ -87,13 +87,13 @@ export function SkillAgentPicker({
   return (
     <div className="flex w-full flex-col gap-2 overflow-hidden text-left">
       <div className="space-y-0.5 px-1">
-        <div className="truncate text-sm font-medium">{title}</div>
-        <div className="text-xs text-muted-foreground">
+        <div className="truncate text-body font-medium">{title}</div>
+        <div className="text-caption text-muted-foreground">
           {t(($) => $.mention.skill_agents_picker_title)}
         </div>
       </div>
       {visibleAgents.length === 0 ? (
-        <div className="px-1 py-2 text-xs text-muted-foreground">{emptyText}</div>
+        <div className="px-1 py-2 text-caption text-muted-foreground">{emptyText}</div>
       ) : (
         <div className="flex flex-col">
           {visibleAgents.map((agent: Agent) => {
@@ -119,7 +119,7 @@ export function SkillAgentPicker({
                   isAgent
                   size="xs"
                 />
-                <span className="min-w-0 flex-1 truncate text-xs">{agent.name}</span>
+                <span className="min-w-0 flex-1 truncate text-caption">{agent.name}</span>
                 <span className="flex shrink-0 items-center gap-1.5">
                   <AgentPickerPresenceDot wsId={wsId} agentId={agent.id} />
                   <Circle

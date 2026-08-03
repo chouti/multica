@@ -69,7 +69,7 @@ function WorkspaceBadge({ workspace }: { workspace: AdminUserWorkspace }) {
   const rc = ROLE_CONFIG[workspace.role];
   const RoleIcon = rc.icon;
   return (
-    <Badge variant="outline" className="gap-1 text-xs">
+    <Badge variant="outline" className="gap-1 text-caption">
       <RoleIcon className={`h-3 w-3 ${rc.color}`} />
       <span className="max-w-24 truncate">{workspace.workspace_name}</span>
       <span className="text-muted-foreground">{workspace.role}</span>
@@ -132,15 +132,15 @@ function UserRow({
               onChange={(e) => setName(e.target.value)}
               onKeyDown={handleKeyDown}
               placeholder={t(($) => $.rename_placeholder)}
-              className="h-7 text-sm"
+              className="h-7 text-body"
               aria-label={t(($) => $.rename_placeholder)}
             />
-            {error && <p className="mt-1 text-xs text-destructive">{error}</p>}
+            {error && <p className="mt-1 text-caption text-destructive">{error}</p>}
           </div>
         ) : (
-          <div className="text-sm font-medium truncate">{user.name}</div>
+          <div className="text-body font-medium truncate">{user.name}</div>
         )}
-        <div className="text-xs text-muted-foreground truncate">{user.email}</div>
+        <div className="text-caption text-muted-foreground truncate">{user.email}</div>
         {user.workspaces.length > 0 && (
           <div className="mt-1.5 flex flex-wrap gap-1">
             {user.workspaces.map((ws) => (
@@ -230,16 +230,16 @@ function InvitationRow({
       </div>
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
-          <span className="text-sm font-medium">{invitation.invitee_email}</span>
+          <span className="text-body font-medium">{invitation.invitee_email}</span>
           {invitation.invitee_name && (
-            <span className="text-xs text-muted-foreground">({invitation.invitee_name})</span>
+            <span className="text-caption text-muted-foreground">({invitation.invitee_name})</span>
           )}
         </div>
-        <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+        <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-caption text-muted-foreground">
           <span>
             {t(($) => $.invitations_invited_by)} {invitation.inviter_name}
           </span>
-          <Badge variant="outline" className="gap-1 text-xs">
+          <Badge variant="outline" className="gap-1 text-caption">
             <RoleIcon className={`h-3 w-3 ${rc?.color ?? "text-muted-foreground"}`} />
             {invitation.workspace_name}
           </Badge>
@@ -364,7 +364,7 @@ function InviteDialog({
                     checked={selectedWorkspaces.includes(ws.id)}
                     onCheckedChange={() => toggleWorkspace(ws.id)}
                   />
-                  <Label htmlFor={`ws-${ws.id}`} className="text-sm font-normal cursor-pointer">
+                  <Label htmlFor={`ws-${ws.id}`} className="text-body font-normal cursor-pointer">
                     {ws.name}
                   </Label>
                 </div>
@@ -470,7 +470,7 @@ function EditWorkspacesDialog({
             <div>
               <Label className="mb-2 block">{t(($) => $.current_workspaces)}</Label>
               {user?.workspaces.length === 0 ? (
-                <p className="text-sm text-muted-foreground">{t(($) => $.no_workspaces)}</p>
+                <p className="text-body text-muted-foreground">{t(($) => $.no_workspaces)}</p>
               ) : (
                 <div className="space-y-2">
                   {user?.workspaces.map((ws) => {
@@ -480,7 +480,7 @@ function EditWorkspacesDialog({
                       <div key={ws.workspace_id} className="flex items-center justify-between gap-2 rounded-md border p-2">
                         <div className="flex items-center gap-2 min-w-0">
                           <RoleIcon className={`h-4 w-4 shrink-0 ${rc.color}`} />
-                          <span className="text-sm truncate">{ws.workspace_name}</span>
+                          <span className="text-body truncate">{ws.workspace_name}</span>
                         </div>
                         <div className="flex items-center gap-1 shrink-0">
                           {editingRole?.workspaceId === ws.workspace_id ? (
@@ -527,7 +527,7 @@ function EditWorkspacesDialog({
                             </>
                           ) : (
                             <>
-                              <Badge variant="outline" className="text-xs">{ws.role}</Badge>
+                              <Badge variant="outline" className="text-caption">{ws.role}</Badge>
                               <Button
                                 size="sm"
                                 variant="ghost"
@@ -580,7 +580,7 @@ function EditWorkspacesDialog({
                       />
                       <Label
                         htmlFor={`add-ws-${ws.id}`}
-                        className="text-sm font-normal cursor-pointer"
+                        className="text-body font-normal cursor-pointer"
                       >
                         {ws.name}
                       </Label>
@@ -693,7 +693,7 @@ function InvitationsTab() {
 
   if (invitations.length === 0) {
     return (
-      <p className="text-sm text-muted-foreground py-8 text-center">{t(($) => $.invitations_empty)}</p>
+      <p className="text-body text-muted-foreground py-8 text-center">{t(($) => $.invitations_empty)}</p>
     );
   }
 
@@ -742,7 +742,7 @@ export function UserManagementPage() {
           >
             <ArrowLeft className="h-4 w-4" />
           </AppLink>
-          <h1 className="text-xl font-semibold">{t(($) => $.page_title)}</h1>
+          <h1 className="text-title-lg font-semibold">{t(($) => $.page_title)}</h1>
         </div>
         <Button size="sm" onClick={() => setInviteOpen(true)}>
           <Plus className="mr-1.5 h-4 w-4" />
@@ -756,7 +756,7 @@ export function UserManagementPage() {
           <button
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
-            className={`px-3 py-2 text-sm font-medium border-b-2 transition-colors ${
+            className={`px-3 py-2 text-body font-medium border-b-2 transition-colors ${
               activeTab === tab.id
                 ? "border-foreground text-foreground"
                 : "border-transparent text-muted-foreground hover:text-foreground"
@@ -786,7 +786,7 @@ export function UserManagementPage() {
               ))}
             </div>
           ) : users.length === 0 ? (
-            <p className="text-sm text-muted-foreground">{t(($) => $.empty)}</p>
+            <p className="text-body text-muted-foreground">{t(($) => $.empty)}</p>
           ) : (
             <div className="overflow-hidden rounded-xl ring-1 ring-foreground/10">
               {users.map((user, i) => (

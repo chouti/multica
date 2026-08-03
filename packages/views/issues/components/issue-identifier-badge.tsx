@@ -14,7 +14,7 @@ export function IssueIdentifierBadge({ issue, onCopy, className }: IssueIdentifi
       type="button"
       onClick={onCopy}
       className={cn(
-        "inline-flex items-center gap-1.5 rounded-md border bg-muted/60 px-2 py-0.5 text-xs font-medium tabular-nums text-foreground",
+        "inline-flex items-center gap-1.5 rounded-md border bg-muted/60 px-2 py-0.5 text-caption font-medium tabular-nums text-foreground",
         "hover:bg-muted hover:border-border/80 transition-colors cursor-pointer",
         className,
       )}

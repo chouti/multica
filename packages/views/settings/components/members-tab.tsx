@@ -386,7 +386,7 @@ export function MembersTab() {
                 </Button>
               </div>
               <div>
-                <label className="text-xs font-medium text-muted-foreground" htmlFor="invite-display-name">
+                <label className="text-caption font-medium text-muted-foreground" htmlFor="invite-display-name">
                   {t(($) => $.members.invite_name_label)}
                 </label>
                 <Input

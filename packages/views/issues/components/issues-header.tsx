@@ -1402,7 +1402,7 @@ export function IssueDisplayControls({
                 <Button
                   variant="outline"
                   size="sm"
-                  className="h-7 gap-1.5 text-xs text-muted-foreground"
+                  className="h-7 gap-1.5 text-caption text-muted-foreground"
                   aria-label={t(($) => $.archived.chip_aria, { count: archivedCount })}
                   onClick={() => act.setStatusFilters(["archived"])}
                   autoFocus

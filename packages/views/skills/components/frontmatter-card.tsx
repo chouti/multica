@@ -24,7 +24,7 @@ export function FrontmatterCard({ data }: { data: SkillFrontmatter }) {
     <div className="rounded-lg border bg-muted/30 px-3 py-2">
       <div className="grid gap-1.5">
         {entries.map(([key, value]) => (
-          <div key={key} className="flex gap-2 text-xs">
+          <div key={key} className="flex gap-2 text-caption">
             <span className="shrink-0 font-medium text-muted-foreground min-w-[80px]">
               {key}
             </span>
