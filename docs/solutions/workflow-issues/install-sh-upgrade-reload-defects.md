@@ -58,3 +58,6 @@ The wrong stamp was historically **hard to notice** because `officialBaseline` m
 - After any install.sh run, **always** `curl /api/config` and assert `server_version` equals the target tag — do not trust install.sh's `loaded` output or a `200 /healthz` alone (healthz is 200 even on the old binary).
 - If the version doesn't flip, the resolver failed (no upstream-verified tag reachable) — set `MULTICA_TRUSTED_BASELINE=vX.Y.Z` and re-run; do not weaken the sanitizer to "make it work."
 - Long-term fix for the launchctl reload (out of scope for the version-stamping work): replace install.sh's `launchctl bootstrap` reload with `kickstart` (loaded) or `bootout` + `bootstrap` (unloaded).
+
+## Related
+- `docs/solutions/runtime-errors/multica-update-leaves-daemon-stale.md` — **daemon CLI instance of the same pattern family** ("file/binary replacement does not swap the running process image"). Where this doc covers the launchd plist jobs (backend/frontend) failing to restart under install.sh's `launchctl bootstrap`, the daemon doc covers the Homebrew-CLI daemon failing to restart under `multica update` / `brew upgrade multica`. Same root-cause family, different component, different recovery command (`multica daemon restart` vs `launchctl bootstrap`+start).
