@@ -1,8 +1,8 @@
 ---
 title: "Member Display Name Management"
 date: 2026-06-15
-last_updated: 2026-07-14
-category: architecture-pattern
+last_updated: 2026-08-04
+category: architecture-patterns
 module: workspace/auth/admin
 problem_type: architecture_pattern
 component: authentication
@@ -112,6 +112,11 @@ func TestSuperAdmin_EmptyList_DenyAll(t *testing.T) {
 - Use `slog.Info` for an audit line with actor email, target user ID, and new name
 - Apply a **separate rate limiter** controlled by `RATE_LIMIT_ADMIN` env var (default 60/min), independent of the main rate limiter
 - For user-supplied UUID path parameters, use a dedicated parser that returns 400 Bad Request — not a generic panic
+
+> **Updated 2026-08-04 (v0.4.17 audit):** two fork-only follow-up commits addressed bugs in this code path that this doc does not cover:
+> - `da216d7cf fix(admin): send user rename through API client, not raw fetch` — the super-admin rename UI used a raw `fetch()` that set only `Content-Type` and never sent the backend double-submit CSRF guard's `X-CSRF-Token` header. The request was rejected but `fetch()` does not throw on 4xx, so the UI showed "renamed" while the DB was unchanged. Fix: route through `useUpdateUserName` React Query mutation so the API client + CSRF interceptor apply. The CSRF header requirement itself is enforced by the backend per CLAUDE.md "API Compatibility" rules.
+> - `ee6d1e031 fix(admin): invalidate users list by prefix so admin mutations refresh it` — `adminKeys.users()` with no args embedded `{search:undefined}` while the live query had `{search:''}`; React Query's `partialMatchKey` rejected the type mismatch, so onSuccess invalidation never matched. Fix: invalidate by the `['admin','users']` prefix.
+> Both fixes are documented in commit messages on this fork and the patterns they correct (CSRF-on-mutations, prefix-based React Query invalidation) are reusable beyond the admin rename surface.
 
 ```go
 func parseUUIDOrBadRequest(w http.ResponseWriter, s, fieldName string) (pgtype.UUID, bool) {

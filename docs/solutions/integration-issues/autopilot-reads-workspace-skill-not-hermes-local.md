@@ -26,36 +26,8 @@ related_components:
   - assistant
 ---
 
----
-title: autopilot 修改未生效：Hermes 本地 skill 与 Multica workspace skill 层级漂移
-date: 2026-07-30
-category: integration-issues
-module: tools/agent-skill-pipeline
-problem_type: integration_issue
-component: tooling
-symptoms:
-  - agent 在 Hermes 本地反复修改 skill 并报告已修复，但 autopilot 输出保持不变
-  - 本地文件的时间、大小和 diff 都能证明修改成功，workspace skill 的 updated_at 与内容却没有变化
-  - 只有用户追问实际修改了哪个 skill 后，agent 才发现 autopilot 仍在读取旧的 workspace 副本
-root_cause: incomplete_setup
-resolution_type: workflow_improvement
-severity: high
-tags:
-  - multica
-  - autopilot
-  - workspace-skill
-  - hermes
-  - runtime-layer
-  - source-of-truth
-  - deployment-verification
-  - upchat
-related_components:
-  - assistant
-  - multica-cli
-  - autopilot
-  - workspace-skill
-  - hermes-runtime
----
+# (中文版本见下方; frontmatter unified above)
+
 
 # autopilot 修改未生效：Hermes 本地 skill 与 Multica workspace skill 层级漂移
 

@@ -1,6 +1,7 @@
 ---
 title: "Hover card inconsistency: mention hover must reuse the same profile cards as actor avatars"
 date: 2026-07-10
+last_updated: 2026-08-04
 category: ui-bugs
 module: mentions
 problem_type: ui_bug
@@ -14,6 +15,8 @@ root_cause: wrong_api
 resolution_type: code_fix
 tags: [hover-card, mention-chip, profile-card, consistency, actor-avatar]
 ---
+
+> **Updated 2026-08-04 (v0.4.17 audit):** the upstream PR this fix was originally developed against — `multica-ai/multica#5199` (Actor mention avatar chips) — was **closed 2026-07-31 without merging** (closed by upstream maintainer Bohan-J). The mention-hover card fix described below is therefore **fork-only and own-forever**, not an "upstream contribution" as an earlier draft of this doc stated. See `docs/customizations.md` line 50 for the canonical PR status and `#5199` ledger entry.
 
 # Hover card inconsistency: mention hover must reuse the same profile cards as actor avatars
 

@@ -1,6 +1,7 @@
 ---
 title: "Daemon CLI version drift detection in the Help menu"
 date: 2026-07-28
+last_updated: 2026-08-04
 category: architecture-patterns
 module: multica
 problem_type: architecture_pattern
@@ -143,6 +144,15 @@ keys were removed from all four locales when the frontend row was dropped.
 - `docs/solutions/workflow-issues/version-reporting-after-upstream-upgrade.md`
   — the version re-stamp workflow; updated to reflect that
   `install.sh` now stamps both halves from the git tag automatically.
+- `docs/solutions/runtime-errors/multica-update-leaves-daemon-stale.md` —
+  **detection→recovery link (added 2026-08-04):** this doc records **detection**
+  (Help-menu row turns `text-destructive` when daemon lags server) but does
+  not document the **recovery** step. When drift is detected, run
+  `multica daemon restart` explicitly — `multica update` (which internally
+  runs `brew upgrade multica`) swaps the on-disk binary symlink but does
+  **not** restart the daemon process, leaving the Help-menu row stale
+  until the manual restart. That gap is the runtime-errors doc; together
+  they close the detect→recover loop.
 - Plan artifact: `docs/plans/2026-07-28-001-feat-cli-version-help-menu-plan.md`
   — the implementation-ready unified plan (R1-R6, AE1-AE6, 4 KTDs) this
   pattern shipped from.

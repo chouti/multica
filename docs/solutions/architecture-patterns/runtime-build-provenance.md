@@ -117,7 +117,9 @@ export function officialBaseline(v?: string): string {
 }
 ```
 
-The Makefile wires both halves at `Makefile:395-411` (`upgrade` target): one resolver call, one `.env` rewrite (preserving `.env.bak`), one `go build` with `-X main.version=$$BASELINE`, one `pnpm build` with `NEXT_PUBLIC_APP_VERSION` set. Drift is structurally impossible because there is one source of truth for both halves in a single invocation.
+The Makefile wires both halves at `Makefile` (`build-prod` target — see drift note below): one resolver call, one `.env` rewrite (preserving `.env.bak`), one `go build` with `-X main.version=$$BASELINE`, one `pnpm build` with `NEXT_PUBLIC_APP_VERSION` set. Drift is structurally impossible because there is one source of truth for both halves in a single invocation.
+
+> **Updated 2026-08-04 (v0.4.17 audit):** the canonical stamp path on this self-host fork is `scripts/selfhost/install.sh` → `_version-stamp.sh` → `scripts/resolve-official-baseline.sh` (not `make upgrade`). The `Makefile` on this checkout has 333 lines (not 395-411) and does **not** define an `upgrade` target — only `build-prod` exists. The Makefile pattern description above remains the **architectural standard form** the doc asserts (one resolver, one `.env`, one stamp), but the in-repo realization is `scripts/selfhost/install.sh`, not `Makefile:395-411`. Read `docs/solutions/workflow-issues/install-sh-upgrade-reload-defects.md` for the actual implementation; the older `Makefile`-based frame stays valid as a portable pattern reference.
 
 ### 3. Transport at runtime
 
@@ -167,7 +169,7 @@ The locale keys live in `packages/views/locales/{en,zh-Hans,ja,ko}/layout.json` 
 - **Operator trust.** Without this pattern, a self-hoster reading "Backend `v0.4.2-dirty`" in the sidebar has no signal that this is not actually a release. With the pattern, anything that isn't upstream-verified reads "Backend unavailable", which is honest and actionable.
 - **Debuggability.** A support engineer looking at a screenshot of the Help sidebar can tell at a glance whether the running frontend and backend agree, and whether each is on a real release. Mismatched rows (e.g. `Frontend v0.4.2` / `Backend unavailable`) immediately point at a deployment step that didn't stamp the value — typically a forgotten `make upgrade` on one half.
 - **Supportability.** The override path (`MULTICA_TRUSTED_BASELINE=vX.Y.Z`) is the only sanctioned way to ship from a shallow clone, source tarball, fork, or offline host. Operators get one knob; support gets one diagnostic ("set the env var to the upstream tag you're tracking"). The four failure modes (shallow clone, source archive, fork, air-gapped) are enumerated in `SELF_HOSTING.md` so operators don't have to guess.
-- **Single source of truth.** One resolver call, one string, both artifacts stamped with the same value in one Make target. A future change that introduces a third artifact (e.g. the CLI) just consumes `$$BASELINE` from the same Makefile target — no second resolver, no drift.
+- **Single source of truth.** One resolver call, one string, both artifacts stamped with the same value in one Make target (or one install.sh invocation on this self-host fork). A future change that introduces a third artifact (e.g. the CLI) just consumes `$$BASELINE` from the same target — no second resolver, no drift.
 - **Defense in depth.** The same rule lives in three layers (shell, TS, Go). Each layer rejects `dev`, hashes, dirty markers, and `-N-g<hash>` suffixes independently. A bug in one layer doesn't poison the UI.
 
 ## When to Apply
@@ -218,7 +220,7 @@ $ MULTICA_TRUSTED_BASELINE=v0.4.2 bash scripts/resolve-official-baseline.sh
 v0.4.2
 ```
 
-**Both halves consume the same baseline** (`Makefile:395-411`):
+**Both halves consume the same baseline** (Makefile `build-prod` target on a portable host; `scripts/selfhost/install.sh` on this fork — see drift note above):
 
 ```makefile
 upgrade: ## Rebuild backend + frontend prod bundle with the resolved official baseline
@@ -278,7 +280,7 @@ Each state is honest, distinct, and actionable.
 
 - **Direct build from checkout** (`make selfhost-build`) — host resolver, then Docker build with both `VERSION` and `NEXT_PUBLIC_APP_VERSION` set.
 - **Direct production build, no Docker** (`make build-prod`) — same resolver, builds `server/bin/server` and `apps/web/.next/...` directly. Fails fast if the baseline cannot be resolved.
-- **Direct production upgrade, no Docker** (`make upgrade`) — same resolver, also rewrites `.env`'s `NEXT_PUBLIC_APP_VERSION` (with `.env.bak`) and rebuilds both halves. The operator then restarts their supervised processes (pm2, systemd, nohup); the target intentionally does not kill them because the supervisor varies per deployment. **Drift note (2026-07-22):** this checkout's Makefile does **not** define an `upgrade` target (`make upgrade` → `No rule to make target`); only `make build-prod` exists. The manual re-stamp fallback (bump `.env` `NEXT_PUBLIC_APP_VERSION` + `go build -ldflags "-X main.version=<tag>"` + `pnpm build`) is documented in `docs/solutions/workflow-issues/version-reporting-after-upstream-upgrade.md`.
+- **Direct production upgrade, no Docker** (`make build-prod` on a portable host, or `bash scripts/selfhost/install.sh` on this fork) — same resolver, also rewrites `.env`'s `NEXT_PUBLIC_APP_VERSION` (with `.env.bak`) and rebuilds both halves. The operator then restarts their supervised processes (pm2, systemd, nohup); the target intentionally does not kill them because the supervisor varies per deployment. **Drift note (2026-07-22):** this checkout's Makefile does **not** define an `upgrade` target (`make upgrade` → `No rule to make target`); only `make build-prod` exists. The self-host stamp path is `scripts/selfhost/install.sh` (which calls `scripts/selfhost/_version-stamp.sh` → `scripts/resolve-official-baseline.sh`). The manual re-stamp fallback (bump `.env` `NEXT_PUBLIC_APP_VERSION` + `go build -ldflags "-X main.version=<tag>"` + `pnpm build`) is documented in `docs/solutions/workflow-issues/version-reporting-after-upstream-upgrade.md`.
 - **Recovery when baseline can't be resolved** — `export MULTICA_TRUSTED_BASELINE=vX.Y.Z` before any of the above. Enumerated failure modes: shallow clone without tags, source archive without `.git`, fork whose `v*` tags aren't on the canonical upstream, offline / air-gapped host.
 
 ## What is NOT in scope
@@ -301,5 +303,5 @@ Each of these would justify its own learning if implemented. They are listed her
 - Frontend helper, store, and platform-boundary call site: `packages/core/config/index.ts:13-19` (`officialBaseline`), `apps/web/components/web-providers.tsx:88` (boundary sanitization before `CoreProvider`).
 - Help menu rendering: `packages/views/layout/help-launcher.tsx:36-43` (text selection) and `packages/views/layout/help-launcher.tsx:104-113` (two-row rendering in the DropdownMenuGroup).
 - Operator-facing docs: `SELF_HOSTING.md` — sections "Upgrading → Direct production upgrade (no Docker)", "Manual Docker Compose Setup → Source build from checkout", "Direct production build (no Docker)", and "Recovery when baseline can't be resolved".
-- Build target: `Makefile:395-411` (`upgrade` target).
+- Build target: Makefile `build-prod` target (or `scripts/selfhost/install.sh` on this fork — see drift note above).
 - Locale strings: `packages/views/locales/{en,zh-Hans,ja,ko}/layout.json` for `cli_label`, `cli_unavailable`, `cli_loading`, `backend_label`, `backend_unavailable`, `backend_loading`. The `help.frontend_label` / `help.frontend_unavailable` keys were removed when the frontend row was dropped (the two stamps were guaranteed identical by the resolver-driven single source, so the row became redundant noise).

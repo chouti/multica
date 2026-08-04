@@ -1,7 +1,8 @@
 ---
 title: "AI agent preference three-carrier landing pattern (CLAUDE.md + memory + governance trace) for CE plugins that do not forward CLAUDE.md"
 date: 2026-07-28
-last_updated: 2026-07-28
+last_updated: 2026-08-04
+category: architecture-patterns
 module: "ce-tooling"
 problem_type: "architecture_pattern"
 component: "tooling"
@@ -19,6 +20,8 @@ tags: [ce, claude-md, memory, governance-trace, three-carrier, ai-agent-preferen
 ## Context
 
 当一个不可修改的编排插件会派发子 agent，却既不承诺把仓库级 `CLAUDE.md` 载入子 agent，也没有可用的 `system_prompt` 注入点时，永久 AI 偏好不能靠"把规则再写强一点"解决。规则是否持久，与规则是否进入某类 agent 的实际运行时上下文，是两个问题。
+
+> **Updated 2026-08-04 (CE plugin drift):** installed CE plugin is **v3.21.0** (`~/.claude/plugins/cache/compound-engineering-plugin/compound-engineering/` contains 3.19.0 / 3.20.0 / 3.21.0), but this doc's evidence + Arrival-matrix were captured at **v3.20.0**. The plugin's own KTD9 trigger (paragraph below) requires re-running the matrix on the new version. The `last_updated:` field is bumped; the v3.20.0 SKILL.md path is preserved as the documented path. **Re-verification of the Arrival-matrix under v3.21.0 is pending** — it requires running `claude -p "<skill>"` headless, which auto-memory `feedback_skill_creator_runloop_proxy` flags as unreliable in this proxy env. Treat the v3.20.0 evidence as still authoritative until manually re-verified.
 
 compound-engineering v3.20.0 展示了这个边界：`ce-compound` 会检查主会话的 auto-memory，并把相关摘录传给 Phase 1 的 Context Analyzer 与 Solution Extractor；该流程缺失或处于非 Claude Code 平台时会跳过，且 memory 只被视作补充上下文（`~/.claude/plugins/cache/compound-engineering-plugin/compound-engineering/3.20.0/skills/ce-compound/SKILL.md:103-118`）。这不是所有 skill 的通用注入契约。
 

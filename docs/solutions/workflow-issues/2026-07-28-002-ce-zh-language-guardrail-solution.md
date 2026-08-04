@@ -1,7 +1,8 @@
 ---
 title: "CE 中文输出语言护栏 (CLAUDE.md + memory + solution 三层) — 不 fork 插件、不改 config schema"
 date: 2026-07-28
-last_updated: 2026-07-28
+last_updated: 2026-08-04
+category: workflow-issues
 module: "ce-tooling"
 problem_type: "workflow_issue"
 component: "ai_agent_language_guardrail"
@@ -15,6 +16,8 @@ symptoms:
   - "Only `skills/ce-compound/SKILL.md:103-118` is documented to forward user auto-memory to its internal Phase 1 sub-agents (Context Analyzer + Solution Extractor)"
 tags: [ce, language, guardrail, conventions, agent-output]
 ---
+
+> **Updated 2026-08-04 (CE plugin drift):** installed CE plugin is **v3.21.0** (`~/.claude/plugins/cache/compound-engineering-plugin/compound-engineering/` contains 3.19.0 / 3.20.0 / 3.21.0), but this doc's evidence + R7 Arrival-matrix were captured at **v3.20.0** (2026-07-28 baseline). The plugin's own KTD9 trigger (`## Event-driven re-evaluation` paragraph) has fired on the 3.20.0→3.21.0 bump but the re-verification has not been performed. Re-verification requires running `claude -p "<skill>"` headless in this proxy env; auto-memory `feedback_skill_creator_runloop_proxy` flags that pattern as unreliable here, so the doc text is preserved as authoritative until a human re-runs the R7 matrix under v3.21.0. The `last_updated:` field is bumped; the v3.20.0 SKILL.md path is preserved as the documented path.
 
 # CE 中文输出语言护栏 — 三层冗余 (2026-07-28 落地)
 

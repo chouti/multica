@@ -1,6 +1,7 @@
 ---
 title: "Run self-host services without Docker or pm2 (bare-process substitutions for every Makefile target)"
 date: 2026-07-22
+last_updated: 2026-08-04
 module: "self-host-operations"
 problem_type: "workflow_issue"
 component: "development_workflow"
@@ -23,6 +24,8 @@ related_components:
   - "tooling"
 tags: [self-hosting, bare-process, docker-free, pm2-empty, makefile, homebrew-postgres, migrate, pg-dump, port-5433, upgrade-sop]
 ---
+
+> **Updated 2026-08-04 (v0.4.17 audit):** this doc covers backend (:8081) and frontend (:3001) as the two `scripts/selfhost/install.sh`-supervised launchd jobs. It does **not** mention the third process on this host — the **Homebrew `multica` CLI daemon** (PPID=1, orphaned to launchd, no `com.fengzhao.multica-daemon` plist). That daemon has its own independent upgrade lifecycle: `multica update` runs `brew upgrade multica` and reports "Update complete" but does **not** restart the running daemon process. To restart the daemon, run `multica daemon restart`. See `docs/solutions/runtime-errors/multica-update-leaves-daemon-stale.md` for the full gap, `docs/solutions/architecture-patterns/daemon-cli-version-drift-detection.md` for the Help-menu drift row that surfaces the stale state. Bare-process commands above (`go run -C server ./cmd/server`, `pnpm -C apps/web exec next start`) cover backend/frontend; the daemon has no bare-process equivalent on this host — it is installed and managed exclusively via Homebrew + the CLI's `daemon start`/`stop`/`restart` subcommands.
 
 # Run self-host services without Docker or pm2 (bare-process substitutions for every Makefile target)
 

@@ -16,6 +16,8 @@ symptoms:
 tags: [self-host, launchd, install-sh, upgrade-reload, provenance]
 ---
 
+
+> **Updated 2026-08-04 (v0.4.17 audit):** the reload defect described below was **subsequently fixed in commit `9c1a9e1bb` on this fork** (2026-07-27). Current `scripts/selfhost/install.sh` runs `launchctl bootout` (line 61) **then** `launchctl bootstrap` (line 69); `bootout` stops the running process so the subsequent `bootstrap` actually exec's the new binary. The version-stamp defect (install.sh not sourcing `.env`) was also fixed in the same commit (`source .env` + correct bootstrap domain). Both defects are now historical post-mortems. **Bare `bash scripts/selfhost/install.sh` is safe to run on this fork for upgrade reload.** The fix description below is retained as the record of what was wrong and why; the body's "Solution" section still applies as the *verification* step (curl `/api/config` + assert `server_version`), but the manual `launchctl bootstrap+start` is no longer needed — install.sh does it internally. The companion runtime-errors doc (`multica-update-leaves-daemon-stale.md`) covers the **third process** this doc does not — the Homebrew-CLI daemon — which remains a separate upgrade gap.
 # install.sh is unsafe for upgrade reload (launchd reload only)
 
 ## Problem

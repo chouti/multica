@@ -1,7 +1,7 @@
 ---
 title: "How to safely upgrade a self-hosted Multica instance with local customizations to a new upstream release"
 date: 2026-07-10
-last_updated: 2026-07-16
+last_updated: 2026-08-04
 category: "workflow-issues"
 module: "git"
 problem_type: "workflow_issue"
@@ -11,9 +11,9 @@ applies_when:
   - "Self-hosted Multica instance with local customization commits on main"
   - "Upstream releases a new version with breaking API changes (e.g. ActorAvatar refactor)"
   - "Local customizations overlap with upstream feature areas (super-admin, skills, UI components)"
-  - "PM2 manages both backend and frontend processes requiring restart after upgrade"
+  - "Launchd manages both backend and frontend processes requiring restart after upgrade"
   - "Post-merge dependency mismatches need manual resolution (pnpm install)"
-tags: [upstream-upgrade, self-hosted, local-customizations, merge-conflicts, post-merge, pm2, go-frontend, dependency-install]
+tags: [upstream-upgrade, self-hosted, local-customizations, merge-conflicts, post-merge, launchd, go-frontend, dependency-install]
 ---
 
 # How to safely upgrade a self-hosted Multica instance with local customizations to a new upstream release
@@ -87,7 +87,7 @@ Not all conflicts deserve the same resolution approach. Categorize each conflict
 
 ```bash
 # Accept upstream version for refactored files
-git checkout origin/main -- packages/ui/actor-avatar.tsx
+git checkout origin/main -- packages/ui/components/common/actor-avatar.tsx
 git add packages/ui/actor-avatar.tsx
 ```
 
@@ -113,7 +113,9 @@ For `readonly-content.test.tsx`, the merge kept upstream's refactored test struc
 
 **Strategy D — Orthogonal function-signature merge.** Local and upstream may each extend the same function's signature along independent axes (e.g. local adds a parameter, upstream adds a return value). Preserve both — the merged signature is the union, not either-or. Picking either side drops one set of functionality.
 
-Canonical example: `triggerTasksForComment` in `server/internal/handler/comment.go` — local added a `skillMentionAgents map[string]pgtype.UUID` parameter (#5346, skill mention registry), upstream changed the return type from `error` to `[]CommentTriggerOutcome` (MUL-4525, partial-success response). The merged signature keeps both. Three call sites had to be adapted: pass the new arg AND assign the new return; a closure whose surrounding type now returns outcomes must `return` the call — a missing `return` compiles as a void body, with the type mismatch surfacing only when the closure is invoked downstream (not at `go build`). When NOT to apply: if both sides wanted to occupy the same parameter slot, this is a real conflict requiring a manual merge at that argument, not the orthogonal pattern.
+Canonical example: `triggerTasksForComment` in `server/internal/handler/comment.go` — local added a `skillMentionAgents map[string][]pgtype.UUID` parameter (#5346, skill mention registry), upstream changed the return type from `error` to `[]CommentTriggerOutcome` (MUL-4525, partial-success response). The merged signature keeps both. Three call sites had to be adapted: pass the new arg AND assign the new return; a closure whose surrounding type now returns outcomes must `return` the call — a missing `return` compiles as a void body, with the type mismatch surfacing only when the closure is invoked downstream (not at `go build`). When NOT to apply: if both sides wanted to occupy the same parameter slot, this is a real conflict requiring a manual merge at that argument, not the orthogonal pattern.
+
+> **Strategy D mirror — single-sided convergence (added 2026-08-04, v0.4.17 audit):** the inverse case exists: upstream may **fully refactor** the function and drop a fork-added parameter axis entirely (without deleting the function). In this case auto-merge picks the fork side cleanly, **no `go build` error** is raised, and the danger moves from "build" to "behavior" — the fork path silently operates alongside upstream's new state machine with no semantic handshake. Detect via the count asymmetry: `git show <tag>:<file> | grep -c <fork_symbol>` (upstream tag = 0) vs `git grep -c <fork_symbol> <file>` (HEAD = non-zero). Decision: keep-fork-path is the workaround; no parameter-axis merge needed because both sides agree on the function existing. Documented as the mirror case in `docs/solutions/workflow-issues/upstream-single-sided-fork-param-convergence-merge.md`. The merge-tree + typecheck post-merge gates do not catch this — only manual review does.
 
 ### Step 4.5 — When your local PR was adopted upstream
 
@@ -221,16 +223,18 @@ Use the **clean tag** — `git describe` on a checkout past the tag yields `vX.Y
 ### Step 8: Restart services and verify
 
 ```bash
-pm2 restart multica-backend multica-frontend
+launchctl kickstart gui/$(id -u)/com.fengzhao.multica-backend
 
 # Verify services are responding
 curl -s -o /dev/null -w "%{http_code}" http://localhost:3001  # frontend
 curl -s -o /dev/null -w "%{http_code}" http://localhost:8081  # backend API
 ```
 
-Both endpoints should return 200 (or 301/302 for frontend routing). If either fails, check pm2 logs for the specific process.
+Both endpoints should return 200 (or 301/302 for frontend routing). If either fails, check the launchd job logs (`log show --predicate 'process == "multica-backend"' --last 1m` or the per-job error log at `~/.multica/logs/{frontend,backend}.err.log`).
 
 > **Self-host caveat (no Docker, pm2 empty).** On a Homebrew-pg self-host like the one this fork runs on, `pm2 restart` fails (pm2's process table is empty) and `make start`/`make test` are Docker-gated. **If services are supervised by launchd** (the production setup since 2026-07-22), restart with `launchctl kickstart gui/$(id -u)/com.fengzhao.multica-backend` and `.../com.fengzhao.multica-frontend`, or re-run `bash scripts/selfhost/install.sh` to rebuild the standalone frontend + stamped backend binary and reload the plists (see `docs/solutions/runtime-errors/caddy-standalone-launchd.md`). **Otherwise (ad-hoc / dev, no supervisor)**, restart by killing the ports and re-running the bare processes: `make stop` then `set -a; source .env; set +a; go run -C server ./cmd/server &` + `pnpm -C apps/web exec next start -p "${FRONTEND_PORT:-3001}" &`. Full runbook (start/stop/migrate/backup/test substitutions): `docs/solutions/workflow-issues/self-host-service-start-without-docker.md`.
+
+> **Daemon restart (added 2026-08-04, v0.4.17 audit):** `multica update` (which internally runs `brew upgrade multica`) does **not** restart the daemon process — it only swaps the on-disk binary symlink. After every `multica update`, manually run `multica daemon restart` and verify with `multica daemon status` (Version field + fresh uptime). Without this step the daemon stays on the pre-upgrade binary in memory and the Help-menu daemon row will show a stale `Version:` until the restart. See `docs/solutions/runtime-errors/multica-update-leaves-daemon-stale.md`. This third process is **not** touched by `scripts/selfhost/install.sh` (which only handles the launchd-managed backend/frontend pair) and is not handled by `launchctl kickstart` (no `com.fengzhao.multica-daemon` plist).
 
 ### Step 9: Restore uncommitted modifications
 
@@ -307,7 +311,7 @@ git diff --name-only --diff-filter=U
 #   packages/views/editor/readonly-content.test.tsx, ...
 
 # 5. Resolve per-file (repeat for each conflict)
-git checkout origin/main -- packages/ui/actor-avatar.tsx && git add packages/ui/actor-avatar.tsx
+git checkout origin/main -- packages/ui/components/common/actor-avatar.tsx && git add packages/ui/actor-avatar.tsx
 # ... manually resolve Config struct, test files, SQL files ...
 
 # 6. Adapt local features
@@ -326,7 +330,7 @@ pnpm build
 git commit -m "merge(upstream): upgrade to v0.3.42 ..."
 
 # 9. Restart and verify service health
-pm2 restart multica-backend multica-frontend
+launchctl kickstart gui/$(id -u)/com.fengzhao.multica-backend
 curl -s -o /dev/null -w "%{http_code}" http://localhost:3001
 curl -s -o /dev/null -w "%{http_code}" http://localhost:8081
 

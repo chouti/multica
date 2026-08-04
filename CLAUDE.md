@@ -19,8 +19,8 @@ Guidance for Claude Code when working in this repository. Keep this file short a
   | 受众 agent 类 | CLAUDE.md (本节) | auto-memory (feedback_zh_guardrails.md) | docs/solutions 留档 |
   |---|---|---|---|
   | 主会话 Claude Code 进程 | ✓ 读本文件 `## 用户偏好` | ✓ 注入 user memory | ✗ 仅供未来 grep |
-  | CE sub-agent (ce-compound) | ✗ SKILL.md 不读 CLAUDE.md | △ ✓ 仅 forward 给 ce-compound 内部 Phase 1 子 agent（Context Analyzer + Solution Extractor，详见 `~/.claude/plugins/cache/compound-engineering-plugin/compound-engineering/3.20.0/skills/ce-compound/SKILL.md:103-118`） | ✗ |
-  | CE sub-agent（ce-brainstorm / ce-plan / ce-code-review / ce-simplify-code / ce-commit / ce-commit-push-pr） | ✗ 无 `system_prompt` 注入位 | △ 仅在主 agent 把 memory 透传到 sub-agent 时有效（CE v3.20.0 不保证） | ✗ |
+  | CE sub-agent (ce-compound) | ✗ SKILL.md 不读 CLAUDE.md | △ ✓ 仅 forward 给 ce-compound 内部 Phase 1 子 agent（Context Analyzer + Solution Extractor，详见 `~/.claude/plugins/cache/compound-engineering-plugin/compound-engineering/3.20.0/skills/ce-compound/SKILL.md:103-118`，v3.21.0 仍在此路径下） | ✗ |
+  | CE sub-agent（ce-brainstorm / ce-plan / ce-code-review / ce-simplify-code / ce-commit / ce-commit-push-pr） | ✗ 无 `system_prompt` 注入位 | △ 仅在主 agent 把 memory 透传到 sub-agent 时有效（CE v3.20.0 不保证；v3.21.0 安装但本节锁定 v3.20.0 的行为假设未重验 — 触发 Plan KTD9 时需重跑 R7 矩阵） | ✗ |
   | 第三方 agent（IDE 扩展 / 自动 code review bot） | ✓ 读本文件 | ✗ 进程不绑 multica 项目 memory scope | ✗ |
 
   `docs/solutions/workflow-issues/2026-07-28-002-ce-zh-language-guardrail-solution.md` 是治理留档，承担"未来接手 / 升级时可检索"职能，**不进入运行时执行上下文**，与本节 + auto-memory 三层分工互不重叠。仅本节对前两类 agent 提供真实冗余；`ce-compound` 子 agent 通过 memory 单独生效；其它 6/7 CE skill sub-agent 的运行时承载层为零（Plan `2026-07-28-002` 的 R7 受控手工验收矩阵 `## Arrival matrix` 节记录每次受控跑结果）。

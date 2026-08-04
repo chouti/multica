@@ -17,30 +17,7 @@ tags:
   - agent-workflow
   - issue-rerun
   - mas-verification
----
 
----
-module: agent-workflow
-date: 2026-07-30
-problem_type: workflow_issue
-component: tooling
-severity: high
-applies_when:
-  - "验证 SKILL.md、agent instructions 或 workflow rules 的改动"
-  - "使用 multica issue rerun 或等价 MAS 重跑流程"
-  - "需要确认新规则确实作用于全新任务执行"
-tags:
-  - clean-state-rerun
-  - false-negative-verification
-  - skill-change-validation
-  - agent-workflow
-  - issue-rerun
-  - mas-verification
-related_components:
-  - autopilot
-  - workspace-skill
-  - agent-instructions
----
 
 # Clean-state rerun protocol: verifying agent rule changes without false negatives
 

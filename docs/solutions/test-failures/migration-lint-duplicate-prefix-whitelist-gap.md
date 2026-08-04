@@ -1,6 +1,8 @@
 ---
 title: "Migration lint whitelist drifted silent on self-host (make test skipped)"
 date: 2026-07-22
+last_updated: 2026-08-04
+category: test-failures
 module: "server/internal/migrations"
 problem_type: "test_failure"
 component: "testing_framework"
@@ -37,6 +39,10 @@ with identical-shape messages for `159` and `160`. The four collision groups:
 - `158` — `158_backfill_comment_source_task_id` (local fork #5309) vs `158_agent_task_queue_chat_input_task_id` (upstream).
 - `159` — `159_backfill_direct_assignment_comment_source_task_id` (local fork #5309) vs `159_chat_message_message_kind` (upstream).
 - `160` — `160_backfill_during_execution_comment_source_task_id` (local fork #5309) vs `160_chat_message_input_owner_index` (upstream).
+- `213` — `213_issue_status_archived` (local fork #6106 archived status) vs `213_task_usage_authoritative_cost` (upstream). Added 2026-07-27 (v0.4.11 upgrade, merge `185d446d8`).
+- `214` — `214_issue_status_classifier_functions` (local fork #6106) vs `214_chat_session_project` (upstream). Added 2026-07-27 (v0.4.11 upgrade).
+
+> **Updated 2026-08-04 (v0.4.17 audit):** the canonical count is now **6 known collision stems** (`119/158/159/160/213/214`), not 4. `docs/customizations.md` Drift notes is the authoritative tracker; v0.4.17 added migration `251_agent_runtime_unbind` with no new collision (stem 251 > fork max 250). When this doc was first written (2026-07-22), only the original 4 were whitelisted; the 213/214 additions happened at v0.4.11 but the doc body was not updated. The lint map at `server/internal/migrations/migrations_lint_test.go:43-53` is the source of truth — re-verify by `grep -n '"[0-9]\+"' server/internal/migrations/migrations_lint_test.go` if reading this after the listed date.
 
 A second-order symptom: nothing in the running self-host service was actually broken. The collision is a static, file-naming concern caught only by the lint test; it does not affect migration execution (see *Why This Works*). Compounding that, `make test` is Docker-gated on this self-host checkout and routinely skipped, so the red test sat undetected — the skill-eval baseline was the first thing to run it in a long time.
 

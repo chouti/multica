@@ -1,6 +1,7 @@
 ---
 title: "@skill mention silently fails to bind when designated agent is already implicit-active (YUP-407)"
 date: 2026-07-24
+last_updated: 2026-08-04
 module: server/internal/handler
 problem_type: logic_error
 component: development_workflow
@@ -20,6 +21,8 @@ tags:
   - r5-r3
   - self-host
 ---
+
+> **Updated 2026-08-04 (v0.4.17 audit):** as of the v0.4.17 upgrade, upstream commit `b06af2ae1` (MUL-5559, agent runtime unbind) **converged the entire fork `skillMentionAgents` path** — `triggerTasksForComment` reverted to 8-arg signature (fork keeps 9-arg workaround), `bindAndEnqueueSkillMentions` / `parseSkillMentionAgents` / the fork's `skill_mention_trigger.go` are now fork-only. The bind-on-skip decoupling logic described below remains in `comment.go:2217-2238` (drifted +494 lines from the doc's original line citation) because the fork kept the bind-designate path. **#5346 PR status is now own-forever** (fork patch vs upstream diverged); see `docs/customizations.md` line 49. Line citations in this doc's body may have drifted — verify against current `comment.go` before relying on them.
 
 # @skill mention silently fails to bind when designated agent is already implicit-active (YUP-407)
 
