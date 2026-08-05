@@ -84,6 +84,7 @@ vi.mock("@multica/core/issues/config", () => ({
     archived: { label: "Archived", iconColor: "text-muted-foreground/70", hoverBg: "hover:bg-accent" },
   },
   PRIORITY_ORDER: ["urgent", "high", "medium", "low", "none"],
+  PRIORITY_DISPLAY_ORDER: ["none", "urgent", "high", "medium", "low"],
   PRIORITY_CONFIG: {
     urgent: { label: "Urgent", bars: 4, color: "text-destructive" },
     high: { label: "High", bars: 3, color: "text-warning" },
