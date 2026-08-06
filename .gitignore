@@ -79,3 +79,7 @@ data/
 # Compound Engineering local config (machine-specific preferences)
 .compound-engineering/*.local.yaml
 .gstack/
+
+# Python (agent tooling)
+__pycache__/
+*.pyc

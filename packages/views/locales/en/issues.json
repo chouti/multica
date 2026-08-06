@@ -319,7 +319,9 @@
     "unsubscribe_this": "Unsubscribe from this issue",
     "unsubscribe_subtree": "Unsubscribe from this issue and its sub-issues",
     "unsubscribe_subtree_failed": "Could not unsubscribe from the sub-issues. Please try again.",
+    "unsubscribe_subtree_succeeded": "Unsubscribed from this issue and its sub-issues.",
     "unsubscribe_subtree_unsupported": "This workspace's server does not support unsubscribing from sub-issues yet. Try again after the next update.",
+    "subscription_update_failed": "Could not update the subscription. Please try again.",
     "no_subscribers_results": "No results found",
     "change_subscribers_placeholder": "Change subscribers...",
     "members_group": "Members",
@@ -330,6 +332,26 @@
     "unpin_tooltip": "Unpin from sidebar",
     "thread_nav_label": "Jump to comment thread",
     "thread_nav_resolved_label": "{{title}} (resolved)",
+    "thread_nav": {
+      "button_label_one": "Comment threads ({{count}})",
+      "button_label_other": "Comment threads ({{count}})",
+      "search_placeholder": "Search threads or authors",
+      "match_count_one": "{{count}} match",
+      "match_count_other": "{{count}} matches",
+      "filter_all": "All",
+      "filter_unresolved": "Unresolved",
+      "filter_resolved": "Resolved",
+      "filter_mine": "@me",
+      "group": {
+        "today": "Today",
+        "yesterday": "Yesterday",
+        "earlier": "Earlier"
+      },
+      "empty": "No threads match",
+      "hint_select": "select",
+      "hint_jump": "jump",
+      "hint_close": "close"
+    },
     "sidebar_tooltip": "Toggle sidebar",
     "find": {
       "placeholder": "Find in issue...",
