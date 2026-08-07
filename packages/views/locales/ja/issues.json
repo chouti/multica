@@ -179,9 +179,10 @@
     "zoom_day": "日",
     "zoom_week": "週",
     "zoom_month": "月",
-"show_closed": "クローズ済みを表示",
+    "show_completed": "完了済みを表示",
     "empty": "スケジュールされたタスクがまだありません。いずれかのタスクに開始日または期限を設定すると、タイムラインに表示されます。",
-    "inverted_dates_warning": "開始日が期限より後になっています。バーは早い日付から遅い日付まで表示されます。"
+    "inverted_dates_warning": "開始日が期限より後になっています。バーは早い日付から遅い日付まで表示されます。",
+    "show_closed": "クローズ済みを表示"
   },
   "actor_issues": {
     "scope": {
@@ -206,14 +207,6 @@
     },
     "search_placeholder": "タスクを検索...",
     "search_empty": "検索条件に一致するタスクがありません。"
-  },
-  "archived": {
-    "view_archived": "アーカイブを表示",
-    "chip_aria_other": "{{count}} 件のアーカイブ済みイシュー",
-    "empty_state_hint_other": "{{count}} 件のアーカイブ済みイシューが非表示です — アーカイブを表示をクリックしてください。",
-    "toast_archived": "アーカイブしました",
-    "toast_view_archived": "アーカイブを表示",
-    "toast_error": "イシューをアーカイブできませんでした"
   },
   "list": {
     "empty_status": "タスクなし",
@@ -253,7 +246,6 @@
     "section_pull_requests": "Pull requests",
     "section_metadata": "メタデータ",
     "section_details": "詳細",
-    "section_token_usage": "トークン使用量",
     "section_quick_actions": "クイックアクション",
     "quick_actions_more": "残り {{count}} 件を表示",
     "quick_action_runs_as": "{{name}} が実行します",
@@ -301,11 +293,6 @@
     "prop_created_by": "作成者",
     "prop_created": "作成日",
     "prop_updated": "更新日",
-    "prop_input": "入力",
-    "prop_output": "出力",
-    "prop_cache": "キャッシュ",
-    "prop_cache_value": "読み取り {{read}} / 書き込み {{write}}",
-    "prop_runs": "実行",
     "activity_section": "アクティビティ",
     "subscribe": "購読",
     "unsubscribe": "購読解除",
@@ -359,7 +346,7 @@
     "link_copy_failed": "リンクをコピーできませんでした",
     "workdir_path_copied": "作業ディレクトリのパスをコピーしました",
     "workdir_path_copy_failed": "作業ディレクトリのパスをコピーできませんでした",
-"workdir_path_unavailable": "まだローカルの作業ディレクトリがありません。ローカルエージェントがこのタスクを実行していません",
+    "workdir_path_unavailable": "まだローカルの作業ディレクトリがありません。ローカルエージェントがこのタスクを実行していません",
     "identifier_copied": "{{identifier}}をコピーしました",
     "identifier_copy_failed": "識別子のコピーに失敗しました"
   },
@@ -428,8 +415,6 @@
     "trigger_source_issue_assignee": "担当",
     "trigger_source_mention_agent": "@メンション",
     "trigger_source_mention_squad_leader": "Squad",
-    "trigger_source_mention_skill": "skillメンション",
-    "trigger_source_thread_parent": "返信",
     "trigger_source_unknown": "トリガー",
     "trigger_skipped_label": "スキップ",
     "trigger_wont_trigger": "今回は開始しません",
@@ -458,7 +443,9 @@
       "bar_authors_more_other": "{{names}} 他 {{count}} 名",
       "resolve_failed": "スレッドを解決できませんでした",
       "unresolve_failed": "スレッドの解決を取り消せませんでした"
-    }
+    },
+    "trigger_source_mention_skill": "skillメンション",
+    "trigger_source_thread_parent": "返信"
   },
   "reply": {
     "placeholder": "返信を残す..."
@@ -505,8 +492,6 @@
     "retry_failed": "作業を再試行できませんでした",
     "retry_blocked": "再試行されませんでした — このエージェントを使用する権限がありません",
     "transcript_tooltip": "トランスクリプトを表示",
-"view_run": "ランを表示",
-    "view_run_cleaned_up": "このコメントのソースランはクリーンアップされました。",
     "cancel_failed": "作業をキャンセルできませんでした",
     "trigger_retry": "再試行",
     "trigger_retry_attempt": "再試行 #{{attempt}}",
@@ -535,7 +520,36 @@
       "source_owner_fallback": "正確な責任者なし — エージェント所有者に帰属",
       "source_backfill": "バックフィルされた帰属",
       "source_unattributed": "責任メンバーを解決できません"
-    }
+    },
+    "usage_total_tooltip": "この課題のトークン使用量 — クリックで実行ごとの内訳",
+    "view_run": "ランを表示",
+    "view_run_cleaned_up": "このコメントのソースランはクリーンアップされました。"
+  },
+  "usage_detail": {
+    "title": "使用量の内訳",
+    "subtitle_other": "{{identifier}} · {{count}} 回の実行",
+    "empty": "この課題では、まだトークン使用量が記録された実行はありません。",
+    "kpi_cost": "費用",
+    "kpi_cost_hint_other": "失敗した {{count}} 回の実行が {{pct}}% を占めます",
+    "kpi_cache": "キャッシュ削減",
+    "kpi_cache_hint": "ヒット率 {{pct}}% · 読み取り {{reads}}",
+    "kpi_tokens": "トークン",
+    "kpi_tokens_hint": "入力 {{input}} · 出力 {{output}}",
+    "by_agent": "エージェント別",
+    "by_agent_total": "合計 {{cost}}",
+    "col_run": "実行",
+    "col_model": "モデル",
+    "col_duration": "所要時間",
+    "col_input": "入力",
+    "col_output": "出力",
+    "col_cache_read": "キャッシュ読",
+    "col_cache_write": "キャッシュ書",
+    "col_tokens": "トークン",
+    "col_cost": "費用",
+    "total": "合計",
+    "note_unpriced_other": "{{count}} 回の実行は使用量が記録されておらず、合計に含まれません。",
+    "note_unmapped": "{{models}} は価格が未登録です。トークンは集計されますが費用は含まれません。",
+    "note_estimate": "費用は公開モデル料金からの概算です（プロバイダーが独自の費用を返した分を除く）。"
   },
   "terminate_dialog": {
     "title": "この作業を停止しますか？",
@@ -661,5 +675,13 @@
     "row_backlog_hint": "エージェントを一時停止のままにします",
     "row_todo_label": "未着手",
     "row_todo_hint": "エージェントを開始します"
+  },
+  "archived": {
+    "view_archived": "アーカイブを表示",
+    "chip_aria_other": "{{count}} 件のアーカイブ済みイシュー",
+    "empty_state_hint_other": "{{count}} 件のアーカイブ済みイシューが非表示です — アーカイブを表示をクリックしてください。",
+    "toast_archived": "アーカイブしました",
+    "toast_view_archived": "アーカイブを表示",
+    "toast_error": "イシューをアーカイブできませんでした"
   }
 }

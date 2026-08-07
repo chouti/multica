@@ -121,31 +121,6 @@ func (q *Queries) GetSkill(ctx context.Context, id pgtype.UUID) (Skill, error) {
 	return i, err
 }
 
-const upsertAgentSkillEnabled = `-- name: UpsertAgentSkillEnabled :execrows
-INSERT INTO agent_skill (agent_id, skill_id, enabled)
-VALUES ($1, $2, TRUE)
-ON CONFLICT (agent_id, skill_id) DO UPDATE SET enabled = TRUE
-`
-
-type UpsertAgentSkillEnabledParams struct {
-	AgentID pgtype.UUID `json:"agent_id"`
-	SkillID pgtype.UUID `json:"skill_id"`
-}
-
-// UpsertAgentSkillEnabled upserts an enabled agent_skill row, converging
-// on enabled=TRUE regardless of prior state. Closes the TOCTOU window
-// that the previous GetAgentSkillEnabled + AddAgentSkill split had.
-// Replaces the prior `if exists && enabled { continue } / if exists
-// else insert / else update` branching — that branching is no longer
-// needed because the upsert handles all three cases atomically.
-func (q *Queries) UpsertAgentSkillEnabled(ctx context.Context, arg UpsertAgentSkillEnabledParams) (int64, error) {
-	result, err := q.db.Exec(ctx, upsertAgentSkillEnabled, arg.AgentID, arg.SkillID)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
 const getSkillByWorkspaceAndName = `-- name: GetSkillByWorkspaceAndName :one
 SELECT id, workspace_id, name, description, content, config, created_by, created_at, updated_at FROM skill
 WHERE workspace_id = $1 AND name = $2
@@ -598,6 +573,31 @@ func (q *Queries) UpdateSkill(ctx context.Context, arg UpdateSkillParams) (Skill
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const upsertAgentSkillEnabled = `-- name: UpsertAgentSkillEnabled :execrows
+INSERT INTO agent_skill (agent_id, skill_id, enabled)
+VALUES ($1, $2, TRUE)
+ON CONFLICT (agent_id, skill_id) DO UPDATE SET enabled = TRUE
+`
+
+type UpsertAgentSkillEnabledParams struct {
+	AgentID pgtype.UUID `json:"agent_id"`
+	SkillID pgtype.UUID `json:"skill_id"`
+}
+
+// Idempotent upsert of an enabled agent_skill row. Closes the TOCTOU window
+// (reliability re-review finding) that existed when the bind pass used
+// GetAgentSkillEnabled + AddAgentSkill as two separate statements — a
+// concurrent disabled-row insert between the SELECT and the INSERT could
+// leave the row disabled. This single statement converges on enabled=TRUE
+// regardless of prior state, eliminating the race.
+func (q *Queries) UpsertAgentSkillEnabled(ctx context.Context, arg UpsertAgentSkillEnabledParams) (int64, error) {
+	result, err := q.db.Exec(ctx, upsertAgentSkillEnabled, arg.AgentID, arg.SkillID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const upsertSkillFile = `-- name: UpsertSkillFile :one

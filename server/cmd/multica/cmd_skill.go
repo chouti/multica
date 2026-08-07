@@ -572,7 +572,6 @@ func printSkillImportResult(cmd *cobra.Command, result map[string]any, isBatch b
 		fmt.Printf("Reason: %s\n", reason)
 	}
 	return nil
-	return nil
 }
 
 func nestedMap(m map[string]any, key string) map[string]any {

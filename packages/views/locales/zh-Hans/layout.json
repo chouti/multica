@@ -33,6 +33,7 @@
     "changelog": "更新日志",
     "discord": "Discord",
     "feedback": "反馈",
+    "server_version": "服务器版本 {{version}}",
     "cli_label": "客户端 CLI",
     "backend_label": "后端",
     "cli_unavailable": "客户端 CLI 版本不可用",
@@ -53,7 +54,6 @@
     "invitation_join": "加入",
     "invitation_decline": "拒绝",
     "log_out": "退出登录",
-    "admin_user_management": "用户管理",
     "new_issue": "新建任务",
     "new_issue_shortcut": "C",
     "pinned_label": "固定",
@@ -63,6 +63,7 @@
     "discord_card": {
       "title": "加入 Discord",
       "dismiss": "关闭"
-    }
+    },
+    "admin_user_management": "用户管理"
   }
 }

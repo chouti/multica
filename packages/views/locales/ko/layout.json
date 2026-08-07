@@ -33,6 +33,7 @@
     "changelog": "변경 로그",
     "discord": "Discord",
     "feedback": "피드백",
+    "server_version": "서버 버전 {{version}}",
     "cli_label": "CLI",
     "backend_label": "백엔드",
     "cli_unavailable": "CLI 버전 정보를 사용할 수 없음",
@@ -53,7 +54,6 @@
     "invitation_join": "참가",
     "invitation_decline": "거절",
     "log_out": "로그아웃",
-    "admin_user_management": "사용자 관리",
     "new_issue": "새 태스크",
     "new_issue_shortcut": "C",
     "pinned_label": "고정됨",
@@ -63,6 +63,7 @@
     "discord_card": {
       "title": "Discord 참여하기",
       "dismiss": "닫기"
-    }
+    },
+    "admin_user_management": "사용자 관리"
   }
 }

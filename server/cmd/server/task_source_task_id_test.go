@@ -88,7 +88,7 @@ func TestSynthesizedSuccessCommentStampsSourceTaskID(t *testing.T) {
 
 	// Non-trivial output, no agent comment during the run → the synthesized
 	// success fallback fires and must stamp source_task_id = taskID.
-	if _, err := taskSvc.CompleteTask(ctx, taskID, []byte(`{"output":"I fixed the issue by editing the config file"}`), "", ""); err != nil {
+	if _, err := taskSvc.CompleteTask(ctx, taskID, []byte(`{"output":"I fixed the issue by editing the config file"}`), "", "", false, ""); err != nil {
 		t.Fatalf("CompleteTask: %v", err)
 	}
 
@@ -125,7 +125,7 @@ func TestFailureSystemCommentStampsSourceTaskID(t *testing.T) {
 
 	taskID := seedDispatchedIssueTask(t, issueID, agentID)
 
-	if _, err := taskSvc.FailTask(ctx, taskID, "agent_error: crashed", "", "", "agent_error"); err != nil {
+	if _, err := taskSvc.FailTask(ctx, taskID, "agent_error: crashed", "", "", "agent_error", false, ""); err != nil {
 		t.Fatalf("FailTask: %v", err)
 	}
 

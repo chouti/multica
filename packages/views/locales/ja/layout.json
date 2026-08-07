@@ -33,6 +33,7 @@
     "changelog": "変更ログ",
     "discord": "Discord",
     "feedback": "フィードバック",
+    "server_version": "サーバーバージョン {{version}}",
     "cli_label": "CLI",
     "backend_label": "バックエンド",
     "cli_unavailable": "CLI のバージョンを取得できません",
@@ -53,7 +54,6 @@
     "invitation_join": "参加",
     "invitation_decline": "辞退",
     "log_out": "ログアウト",
-    "admin_user_management": "ユーザー管理",
     "new_issue": "新規タスク",
     "new_issue_shortcut": "C",
     "pinned_label": "ピン留め済み",
@@ -63,6 +63,7 @@
     "discord_card": {
       "title": "Discord に参加",
       "dismiss": "閉じる"
-    }
+    },
+    "admin_user_management": "ユーザー管理"
   }
 }
