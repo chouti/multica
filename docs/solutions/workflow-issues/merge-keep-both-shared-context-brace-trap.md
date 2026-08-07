@@ -115,5 +115,6 @@ func TestIssueCommentListHelpCarriesReadContract(t *testing.T) {
 ## Related（相关文档）
 
 - `docs/solutions/workflow-issues/safe-upstream-upgrade-with-local-customizations.md` — self-host 升级合并的 10 步 SOP；本文是其 resolve 阶段的一个具体陷阱深挖。
+- `docs/solutions/workflow-issues/merge-keep-both-json-trailing-comma-trap.md` — **同族陷阱的 JSON 变体**。同一根因族「git 字面匹配 ≠ 语义对齐（KEEP-BOTH）」，但机制不同：本文是 git 把尾部 `}` 划出冲突块破坏**括号**平衡（python slice + `gofmt` 校验）；那篇是 fork 末行缺**逗号**导致 union 后 JSON 非法（union + 补逗号 + `json.tool` 校验）。不同文件（Go 测试 vs locale JSON）、不同校验器。
 - `docs/solutions/workflow-issues/rerere-stale-auto-resolution-upgrade-merge.md` — rerere 在升级合并的行为（与本文的 git merge 内部边界是不同层面：rerere 是缓存层，共同 context 是 diff 算法层）。
 - `docs/upgrades/v0.4.18-plan.md` — 本次升级 Phase 4 的完整 resolve 记录（含此冲突的 python 脚本）。
