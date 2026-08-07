@@ -52,8 +52,20 @@ When merging a feature branch (based on `origin/main`) into a local `main` branc
 
 For files that both branches added/modified, take the feature branch's version for component files (CI-verified) and keep both sides' imports when they're additive:
 
+> **Caveat — `--theirs` is only safe on a pure follow-upstream file.** Before reaching for
+> `git checkout --theirs <file>`, confirm the local side made *zero* additions to that file:
+> `git diff <merge-base>..HEAD -- <file>` should show no local-side additions. If the local
+> branch **adds members the other side lacks** (locale keys, class methods, exported symbols,
+> component props), a whole-file `--theirs` silently deletes those members with no conflict
+> marker and often no build/test failure. Use a true three-way merge instead —
+> `git merge-file <ours> <base> <theirs>` — then run a loss scan (`flat(before) − flat(after) == ∅`)
+> to prove nothing local was dropped. In the v0.4.18→v0.4.20 upstream upgrade this exact move
+> wiped 324 fork-only locale keys and the fork's `client.ts` admin/skill methods.
+> See `docs/solutions/workflow-issues/merge-conflict-checkout-theirs-drops-fork-only-members.md`.
+
 ```bash
-# For "both added" files (new components):
+# For "both added" files (new components) — only after confirming the local side
+# added nothing the other side lacks (see caveat above):
 git checkout --theirs packages/ui/components/common/actor-mention-chip.tsx ...
 
 # For additive imports (both sides added different imports):
@@ -127,6 +139,8 @@ curl -s http://localhost:8081/healthz
 
 - `docs/solutions/workflow-issues/unapplied-migrations-after-upstream-upgrade.md` — covers a similar scenario after upstream version upgrades
 - `docs/solutions/workflow-issues/safe-upstream-upgrade-with-local-customizations.md` — covers the broader upgrade workflow for self-hosted instances
+- `docs/solutions/workflow-issues/merge-conflict-checkout-theirs-drops-fork-only-members.md` — corrects and scopes this doc's Step 1 `--theirs` advice: whole-file side-picks drop fork-only members; use `git merge-file` + a loss scan on fork-additive files
+- `docs/solutions/workflow-issues/fork-customization-invariant-set-upstream-test-collision.md` — the companion surface: a fork customization spans code + tests + every locale, and 3-way merge is blind to fork-code × upstream-test collisions, so run the *new* tests after any merge rather than trusting a clean auto-merge
 
 ## Related Artifacts
 
