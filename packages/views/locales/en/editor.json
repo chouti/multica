@@ -81,7 +81,8 @@
     "skill_hide_details": "Hide details",
     "skill_view_full": "View full skill →",
     "skill_agents_picker_title": "Choose agents to run this skill",
-    "skill_agent_row_aria": "Toggle {{name}}"
+    "skill_agent_row_aria": "Toggle {{name}}",
+    "group_cancelled": "Cancelled"
   },
   "slash_command": {
     "no_skills_configured": "No skills configured",
