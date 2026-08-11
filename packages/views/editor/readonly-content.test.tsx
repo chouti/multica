@@ -34,6 +34,8 @@ vi.mock("@multica/core/paths", () => ({
 
 vi.mock("../navigation", () => ({
   useNavigation: () => ({ push: vi.fn(), openInNewTab: vi.fn() }),
+  useOptionalNavigation: () => ({ push: vi.fn(), openInNewTab: vi.fn() }),
+  resolveClickIntent: () => "push",
   useAppOrigin: () => null,
 }));
 

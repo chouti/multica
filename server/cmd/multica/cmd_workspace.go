@@ -358,6 +358,9 @@ func resolveWorkspaceRef(ctx context.Context, cmd *cobra.Command, input string) 
 }
 
 func runWorkspaceSwitch(cmd *cobra.Command, args []string) error {
+	if err := requireHumanLocalCommand("workspace switch"); err != nil {
+		return err
+	}
 	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 

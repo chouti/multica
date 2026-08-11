@@ -8,6 +8,7 @@ import { useWelcomeStore } from "@multica/core/onboarding";
 import { officialBaseline } from "@multica/core/config";
 import packageJson from "../package.json";
 import { WebNavigationProvider } from "@/platform/navigation";
+import { WebScrollRestorationProvider } from "@/platform/scroll-restoration";
 import {
   setLoggedInCookie,
   clearLoggedInCookie,
@@ -94,7 +95,9 @@ export function WebProviders({
       resources={resources}
       localeAdapter={localeAdapter}
     >
-      <WebNavigationProvider>{children}</WebNavigationProvider>
+      <WebNavigationProvider>
+        <WebScrollRestorationProvider>{children}</WebScrollRestorationProvider>
+      </WebNavigationProvider>
     </CoreProvider>
   );
 }
