@@ -1,7 +1,7 @@
 ---
 title: "Local customization ledger — tracking divergent commits and upstream PR status"
 date: 2026-07-17
-last_updated: 2026-08-05
+last_updated: 2026-08-13
 category: "workflow-issues"
 module: "git"
 problem_type: "workflow_issue"
@@ -126,6 +126,16 @@ git diff <tag>..HEAD -- <path>   # expect only deliberate deltas, not redundant 
 - **The mention cluster is the recurring cost.** If upstream ever lands a native mention-chip system, expect to drop #5199 and #5346 together and re-apply only the skill-mention gesture + bind-on-submit logic on top of upstream's version. **v0.4.6 status (audited 2026-07-21): that precondition has NOT occurred** — upstream `5a11232c4` is a *renderer move* (hollows `readonly-content.tsx`, relocates read-only render to the new `packages/views/rich-content/rich-content.tsx`), not a native mention system; the `project-mention-a11y.test.tsx` in the new dir is just an a11y fix (`<span onClick>` → `<AppLink>`), not a chip system. So this round: re-apply the readonly chips into `rich-content.tsx` (the editable face — `mention-view.tsx` etc. — is untouched by upstream). The shared hot file is `packages/views/editor/extensions/mention-view.tsx`; the 7-17 @skill redesign widened the cluster's surface further into `content-editor.tsx`, `comment-input.tsx`, `comment-draft-store.ts`, and several new gesture files (see the redesign note under the mention cluster table, and `docs/upgrades/v0.4.6-plan.md`).
 - **Rejected features compound silently.** #5539 was closed by upstream (2026-07-16) yet its code still lives in your leading commits — a rejected feature you forget about still drifts and still costs merge time. Track upstream rejections here the moment they happen. (Contrast #5466: self-withdrawn and fully reverted, so it carries **no** local footprint — see the Withdrawn table.)
 - **The `'project'` token in `MENTION_MARKUP_SOURCE` is NOT a #5466 revival.** `a75305c27` (skill-mention cluster) added `'project'` to the markup-source enum purely for backend parity/completeness — there is no `@project` UI and no typed-mention code behind it. A future reviewer grepping `'project'` may misread it as #5466 (withdrawn @project typed mention) coming back. It is not; do not "clean it up" by removing it.
+
+## Last upgrade — v0.4.23 → v0.4.24 (EXECUTED 2026-08-13)
+
+✅ **EXECUTED 2026-08-13** — merge commit `cf41b2434` (TRUE 2-parent: fork `026e45e89` + `ad23d1da3`=v0.4.24 tag commit), base now `v0.4.24`. Clean merge-base `e0d0b3815` (= v0.4.23^{commit}), **31 upstream commits, 251 files (+16394/-3234)**. Drivers: **workspace-teardown 重写 + agent-template 全量移除 + slug 罗马化 (MUL-6050 issue-prefix 改 4-char) + 聊天历史 nav + daemon GC/repocache**. **6 手动冲突 == merge-tree 预测完全吻合**（client.ts / schema.test.ts / readonly-content.test.tsx / step-workspace.tsx / handler.go / workspace.go），18 auto-merge。
+
+**Headline — Phase 5 连续第二轮零 fork-code × upstream-test 碰撞（继 v0.4.23 后）。** agent-template 是 fork 里的 **dead base-inherited code**（server `agenttmpl/` pkg + client queries/schemas/types/tests），上游原子删除 → 干净 accept-upstream 全收，零活行为损失（grep 验过零 consumer）。**一个产品决策（Phase 2 用户批准）：放弃 fork 的 slug-fallback issue-prefix 定制**（`generateIssuePrefix(name,slug)` = 3-char + "ws" tail）**取上游 MUL-6050**（`defaultIssuePrefixFromSlug` = 4-char）—— 这是 *deliberately abandoned* fork invariant，不再 carry。冲突要点：**handler.go (C keep-both)** 保 fork `parseSkillMentionAgents` (#5346, 上限 8/16) + 插 upstream `DeclareChannelFileDelivery`/`channelDeliversFiles`；**workspace.go + step-workspace.tsx (A)** 取上游 MUL-6050；**client.ts** 保 fork `BatchImportResponseSchema` 删 upstream-removed `AgentTemplateSchema`；**schema.test.ts** 保 fork `importSkillsBatch` (2 tests) 删 `createAgentFromTemplate` dead block；**readonly-content.test.tsx** 删 3 autolink tests（fork 移除了 mock 定义）取 upstream CJK emphasis parametric。loss scan 全 ∅。
+
+**Phase 5 全绿:** pnpm install、typecheck、go build/vet、sqlc generate 无 drift、pnpm test 零碰撞、build 3/3。**Phase 6 deploy:** pg17 备份 `~/multica-backups/v0.4.24-pre-migrate-20260813T035243Z.dump`(58M);migrate up 应用 **11 新迁移 (273-284 skip 280 — 上游本身跳号,非 fork 撞号)**,latest=`284_task_owner_row_fence`,零新撞号(6 已知 119/158/159/160/213/214 完好);install.sh commit-first 正确（cf41b2434 在 HEAD → `git describe` 解析 v0.4.24,非 v0.4.23 fallback 陷阱）,`_version-stamp.sh` export NEXT_PUBLIC_APP_VERSION 覆盖 .env,backend `-ldflags -X main.version=v0.4.24` 验过（strings 二进制 main.version=v0.4.24）,前端 0.4.24 in 4 files（0.4.23 仅 changelog 历史,非 stale）,`.env` line 27 bump v0.4.24;health `/healthz` 200、`/api/config server_version=v0.4.24`、`:3001` 200;**brew upgrade multica 0.4.23→0.4.24 + `multica daemon restart`**(pid 43145→39135,CLI commit `ad23d1da3` = v0.4.24 tag commit) —— CLI/daemon/backend/frontend 全 v0.4.24,5 workspace + 5 agents (claude/codex/opencode/openclaw/hermes) 完好。
+
+→ **`docs/upgrades/v0.4.24-plan.md`** (frontmatter `upgrade_contract: selfhost-upgrade/v1`, `phase: done`, merge_commit `cf41b2434`, 18 verified negative claims, actuals-vs-plan in Phase 7 section)
 
 ## Last upgrade — v0.4.22 → v0.4.23 (EXECUTED 2026-08-12)
 
