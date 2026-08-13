@@ -22,10 +22,6 @@ import type {
   Agent,
   MikaBootstrapResponse,
   CreateAgentRequest,
-  AgentTemplate,
-  AgentTemplateSummary,
-  CreateAgentFromTemplateRequest,
-  CreateAgentFromTemplateResponse,
   AgentBuilderRuntimeSwitch,
   AgentBuilderSession,
   AgentBuilderSessionSummary,
@@ -188,7 +184,11 @@ import type {
   CreateBillingPortalSessionResponse,
 } from "../types";
 import type { OnboardingCompletionPath } from "../onboarding/types";
-import type { CreateFeedbackResponse, FeedbackKind } from "../feedback/types";
+import type {
+  CreateFeedbackResponse,
+  FeedbackContext,
+  FeedbackKind,
+} from "../feedback/types";
 import type {
   CloudRuntimeNode,
   CreateCloudRuntimeNodeRequest,
@@ -200,8 +200,6 @@ import { getCurrentSlug } from "../platform/workspace-storage";
 import { parseWithFallback } from "./schema";
 import {
   AgentTaskListSchema,
-  AgentTemplateSchema,
-  AgentTemplateSummaryListSchema,
   BatchImportResponseSchema,
   AttachmentResponseSchema,
   CancelTaskResponseSchema,
@@ -218,7 +216,6 @@ import {
   IssueTriggerPreviewSchema,
   CloudRuntimeNodeListSchema,
   CloudRuntimeNodeSchema,
-  CreateAgentFromTemplateResponseSchema,
   AgentBuilderRuntimeSwitchSchema,
   AgentBuilderSessionSchema,
   AgentBuilderSessionListSchema,
@@ -230,8 +227,6 @@ import {
   DashboardFailureByAgentListSchema,
   DashboardUsageByAgentListSchema,
   DashboardUsageDailyListSchema,
-  EMPTY_AGENT_TEMPLATE_DETAIL,
-  EMPTY_AGENT_TEMPLATE_SUMMARY_LIST,
   EMPTY_APP_CONFIG,
   EMPTY_ATTACHMENT,
   EMPTY_BATCH_IMPORT_RESPONSE,
@@ -240,7 +235,6 @@ import {
   EMPTY_PRIORITIZE_QUEUED_CHAT_TASK_RESPONSE,
   EMPTY_CLOUD_RUNTIME_NODE,
   EMPTY_CLOUD_RUNTIME_NODE_LIST,
-  EMPTY_CREATE_AGENT_FROM_TEMPLATE_RESPONSE,
   EMPTY_AGENT_BUILDER_SESSION,
   EMPTY_GROUPED_ISSUES_RESPONSE,
   EMPTY_ISSUE_TABLE_FACETS_RESPONSE,
@@ -936,6 +930,7 @@ export class ApiClient {
     url?: string;
     workspace_id?: string;
     kind?: FeedbackKind;
+    context?: FeedbackContext;
   }): Promise<CreateFeedbackResponse> {
     const raw = await this.fetch<unknown>("/api/feedback", {
       method: "POST",
@@ -1318,51 +1313,6 @@ export class ApiClient {
       AgentBuilderRuntimeSwitchSchema,
       agentBuilderRuntimeSwitchFallback(data.runtime_id),
       { endpoint: "PATCH /api/agent-builder/sessions/{id}/runtime" },
-    );
-  }
-
-  async listAgentTemplates(): Promise<AgentTemplateSummary[]> {
-    const raw = await this.fetch<unknown>("/api/agent-templates");
-    return parseWithFallback(
-      raw,
-      AgentTemplateSummaryListSchema,
-      EMPTY_AGENT_TEMPLATE_SUMMARY_LIST,
-      { endpoint: "GET /api/agent-templates" },
-    );
-  }
-
-  async getAgentTemplate(slug: string): Promise<AgentTemplate> {
-    const raw = await this.fetch<unknown>(
-      `/api/agent-templates/${encodeURIComponent(slug)}`,
-    );
-    // Round-trip the requested slug into the fallback so a malformed
-    // detail response still produces a navigable record matching the URL
-    // the user clicked.
-    return parseWithFallback(
-      raw,
-      AgentTemplateSchema,
-      { ...EMPTY_AGENT_TEMPLATE_DETAIL, slug },
-      { endpoint: "GET /api/agent-templates/:slug" },
-    );
-  }
-
-  /** Creates an agent from a curated template. The server fetches every
-   *  referenced skill URL in parallel, materializes them into the workspace
-   *  (find-or-create by name), and writes the agent + skill bindings in a
-   *  single transaction. On any upstream fetch failure, the entire write is
-   *  rolled back and the API returns 422 with `failed_urls`. */
-  async createAgentFromTemplate(
-    data: CreateAgentFromTemplateRequest,
-  ): Promise<CreateAgentFromTemplateResponse> {
-    const raw = await this.fetch<unknown>("/api/agents/from-template", {
-      method: "POST",
-      body: JSON.stringify(data),
-    });
-    return parseWithFallback(
-      raw,
-      CreateAgentFromTemplateResponseSchema,
-      EMPTY_CREATE_AGENT_FROM_TEMPLATE_RESPONSE,
-      { endpoint: "POST /api/agents/from-template" },
     );
   }
 
@@ -2174,7 +2124,7 @@ export class ApiClient {
     return this.fetch(`/api/workspaces/${id}`);
   }
 
-  async createWorkspace(data: { name: string; slug: string; description?: string; context?: string }): Promise<Workspace> {
+  async createWorkspace(data: { name: string; slug: string; description?: string; context?: string; issue_prefix?: string }): Promise<Workspace> {
     return this.fetch("/api/workspaces", {
       method: "POST",
       body: JSON.stringify(data),

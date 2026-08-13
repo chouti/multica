@@ -34,6 +34,7 @@ import ReactMarkdown, {
 import type { ComponentPropsWithoutRef, ReactNode } from "react";
 import rehypeKatex from "rehype-katex";
 import remarkBreaks from "remark-breaks";
+import remarkCjkFriendly from "remark-cjk-friendly/parseOnly";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeRaw from "rehype-raw";
@@ -72,6 +73,7 @@ import { ActorMentionChip, type ActorMentionType } from "@multica/ui/components/
 import { SkillMentionChip } from "@multica/ui/components/common/skill-mention-chip";
 import { isActorMentionType, type MentionType } from "@multica/core/mention";
 import { computeClosedFenceOffsets } from "./streaming-fence";
+import { remarkRepairCjkStrongTrailingWhitespace } from "./cjk-emphasis";
 import {
   CodeBlockShell,
   RichFenceBlock,
@@ -508,6 +510,8 @@ const REMARK_PLUGINS = [
   [remarkMath, { singleDollarTextMath: false }],
   remarkBreaks,
   [remarkGfm, { singleTilde: false }],
+  remarkCjkFriendly,
+  remarkRepairCjkStrongTrailingWhitespace,
 ] satisfies NonNullable<ReactMarkdownOptions["remarkPlugins"]>;
 
 const REHYPE_PLUGINS = [
