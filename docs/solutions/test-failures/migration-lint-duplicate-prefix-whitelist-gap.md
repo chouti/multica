@@ -1,7 +1,7 @@
 ---
 title: "Migration lint whitelist drifted silent on self-host (make test skipped)"
 date: 2026-07-22
-last_updated: 2026-08-04
+last_updated: 2026-08-13
 category: test-failures
 module: "server/internal/migrations"
 problem_type: "test_failure"
@@ -42,7 +42,7 @@ with identical-shape messages for `159` and `160`. The four collision groups:
 - `213` — `213_issue_status_archived` (local fork #6106 archived status) vs `213_task_usage_authoritative_cost` (upstream). Added 2026-07-27 (v0.4.11 upgrade, merge `185d446d8`).
 - `214` — `214_issue_status_classifier_functions` (local fork #6106) vs `214_chat_session_project` (upstream). Added 2026-07-27 (v0.4.11 upgrade).
 
-> **Updated 2026-08-04 (v0.4.17 audit):** the canonical count is now **6 known collision stems** (`119/158/159/160/213/214`), not 4. `docs/customizations.md` Drift notes is the authoritative tracker; v0.4.17 added migration `251_agent_runtime_unbind` with no new collision (stem 251 > fork max 250). When this doc was first written (2026-07-22), only the original 4 were whitelisted; the 213/214 additions happened at v0.4.11 but the doc body was not updated. The lint map at `server/internal/migrations/migrations_lint_test.go:43-53` is the source of truth — re-verify by `grep -n '"[0-9]\+"' server/internal/migrations/migrations_lint_test.go` if reading this after the listed date.
+> **Updated 2026-08-04 (v0.4.17 audit):** the canonical count is now **6 known collision stems** (`119/158/159/160/213/214`), not 4. `docs/customizations.md` Drift notes is the authoritative tracker; v0.4.17 added migration `251_agent_runtime_unbind` with no new collision (stem 251 > fork max 250). When this doc was first written (2026-07-22), only the original 4 were whitelisted; the 213/214 additions happened at v0.4.11 but the doc body was not updated. The lint map at `server/internal/migrations/migrations_lint_test.go:43-53` is the source of truth — re-verify by `grep -n '"[0-9]\+"' server/internal/migrations/migrations_lint_test.go` if reading this after the listed date. Re-confirmed v0.4.24 (2026-08-13): upstream's `273`-`284` all exceed fork max `272` (zero new collision), the 6 known stems remain applied, and `280` is skipped only because upstream itself omits it — not a fork artifact.
 
 A second-order symptom: nothing in the running self-host service was actually broken. The collision is a static, file-naming concern caught only by the lint test; it does not affect migration execution (see *Why This Works*). Compounding that, `make test` is Docker-gated on this self-host checkout and routinely skipped, so the red test sat undetected — the skill-eval baseline was the first thing to run it in a long time.
 
@@ -71,6 +71,13 @@ The lint test is a developer guard against accidentally introducing new duplicat
 1. **Versions are full stems, not numeric prefixes.** `ExtractVersion` (`server/internal/migrations/migrations.go:95-100`) strips only the `.up.sql` / `.down.sql` suffix and keeps everything else, so `158_backfill_comment_source_task_id` and `158_agent_task_queue_chat_input_task_id` are distinct version strings despite sharing the `158` prefix.
 
 2. **`schema_migrations` keys on that full stem.** The migration runner creates the bookkeeping table with `version TEXT PRIMARY KEY`, and the apply loop stores `migrations.ExtractVersion(file)` into that column via parameterized insert/delete. Each same-prefix-different-slug migration lands as an independent row and is applied/skipped independently by the `EXISTS` check.
+
+**Runtime verification (v0.4.24 upgrade, 2026-08-13).** The code-level argument above was confirmed against the live database, not just read from source. `\d schema_migrations` reports the table as `version text NOT NULL` + `applied_at timestamptz NOT NULL DEFAULT now()`, keyed by `schema_migrations_pkey PRIMARY KEY (version)` — the **`text` (not `integer`) type of `version` is the load-bearing detail**, and the presence of `applied_at` distinguishes Multica's shape from both goose (`version int + dirty bool`) and stock golang-migrate (`version bigint`, single column). Querying the applied set confirms same-prefix stems coexist as independent rows: prefix `032` has four applied versions (`032_drop_agent_triggers`, `032_issue_search_index`, `032_runtime_owner`, `032_task_usage`), `029` has three, and each of the six known collision stems (`119/158/159/160/213/214`) shows both slug variants present. The v0.4.24 `migrate up` applied 11 new upstream migrations (`273`-`284`, skipping `280` which upstream itself omits) with **zero new collision** — every new stem exceeds the fork's previous max of `272`. Verification:
+
+```sql
+\d schema_migrations                                            -- confirms `version` is text, not integer
+SELECT version FROM schema_migrations WHERE version ~ '^119_';  -- both slug variants present as rows
+```
 
 So whitelisting the collision in the lint map is purely declarative: it tells the test "yes, I know about these, leave them alone," and nothing about how migrations run at startup changes. The server was healthy the whole time the test was red — which also explains why nobody noticed.
 
