@@ -120,8 +120,6 @@ func init() {
 	workspaceCreateCmd.Flags().String("output", "json", "Output format: table or json")
 	workspaceGetCmd.Flags().String("output", "json", "Output format: table or json")
 	workspaceMemberListCmd.Flags().String("output", "table", "Output format: table or json")
-	workspaceMemberInviteCmd.Flags().String("role", "member", "Member role to grant: member or admin (owner is not allowed)")
-	workspaceMemberInviteCmd.Flags().String("output", "table", "Output format: table or json")
 
 	workspaceMemberInviteCmd.Flags().String("email", "", "Invitee email address (required)")
 	workspaceMemberInviteCmd.Flags().String("role", "member", "Role to assign: member or admin")
