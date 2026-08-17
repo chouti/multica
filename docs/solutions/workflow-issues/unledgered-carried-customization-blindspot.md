@@ -1,6 +1,7 @@
 ---
 title: "Un-ledgered carried customization blind spot at upstream merge"
 date: 2026-08-12
+last_updated: 2026-08-17
 category: workflow-issues
 module: git
 problem_type: workflow_issue
@@ -37,6 +38,8 @@ self-host Multica fork 用 `docs/customizations.md` 作为"我们 carry 什么"�
 3. **验证：post-merge 枚举路由/符号/exports 作兜底。** 即便用了外科式工具，auto-merge 仍可能因 context 重叠丢掉一个注册点。对热点文件（router、handler 注册表、locale、barrel exports）merge 后 grep 一遍关键符号，确认 fork 的定制 + 上游的新增**都在**。这是"auto-merge ≠ 语义正确"的最后一道闸。
 
 ## Why This Matters
+
+**后记（2026-08-17，v0.4.26 审计）**：本文的活例后来补记入 ledger，但知识又过期了半边——v0.4.26 审计确认 VCS 簇实为 upstream **MERGED**（#5006 于 2026-07-24 合入、随 v0.4.24 发布；fork 拷贝与上游字节一致 = ghost），ledger 行已改判进 Adopted upstream 表。盲点因此有两个半边：**漏记**（本文化解）与**记了但状态过期**（需每轮升级用 gh 复核 Open PRs 行）。另外本文提出的 ledger-coverage 审计 lane 已被吸收为 upgrade skill Phase 1 fan-out 的第 (b) 路（`.claude/skills/upgrade-upstream/SKILL.md`：cluster your local ahead-commits by scope and verify the ledger covers them）。
 
 本轮 v0.4.22 → v0.4.23 升级是这条盲点的活样本。fan-out 审计的第三路（ledger-coverage）发现 fork 有一个完整的 **VCS 自托管 Git provider 簇**——支持 Forgejo/Gitea/GitLab 作为 GitHub 之外的 Git provider（PR #5006 / #5888，含 self-host-only 收敛、迁移撞号修复 #5883 / #5868；**未合并入上游 v0.4.23**，本轮 fork-only carry）。这个簇有新建文件 `server/internal/handler/vcs.go`、`packages/views/settings/components/vcs-tab.tsx`、`vcs_webhook.go`，并触碰 `server/cmd/server/router.go`（注册 5 个路由 + VCS secretbox 初始化）和 `packages/views/locales/*/settings.json`（每语言约 41 个 key）。
 

@@ -1,7 +1,7 @@
 ---
 title: "How to safely upgrade a self-hosted Multica instance with local customizations to a new upstream release"
 date: 2026-07-10
-last_updated: 2026-08-04
+last_updated: 2026-08-17
 category: "workflow-issues"
 module: "git"
 problem_type: "workflow_issue"
@@ -23,6 +23,8 @@ tags: [upstream-upgrade, self-hosted, local-customizations, merge-conflicts, pos
 Self-hosted instances of Multica accumulate local customizations — feature additions, admin tooling, config struct fields, i18n tweaks — that sit on top of the upstream `main`. When upstream releases a new version with breaking changes (such as the v0.3.42 ActorAvatar refactor across 35 commits), the upgrade is not a simple `git pull`. The instance had 43 local customization commits spanning TypeScript UI code, Go backend config, SQL migrations, and test suites. A naive merge would produce dozens of conflicts and, if resolved carelessly, silently drop local work or introduce type errors from mismatched upstream APIs.
 
 This document captures the full upgrade workflow as a repeatable practice, distilling the concrete steps, conflict-resolution strategies, and post-merge adaptation patterns into guidance for future upgrades.
+
+> **How this SOP relates to the upgrade skill (2026-08-17).** This file is the mechanical reference. The operational driver on this host is `.claude/skills/upgrade-upstream/SKILL.md` (deep pre-merge audit, adversarial verification of negative claims, resumable phase state machine); host-specific facts that override the generic assumptions here (no Docker/pm2 — launchd-supervised bare processes, pg17 on :5433, version re-stamp at two injection points) live in its `.claude/skills/upgrade-upstream/references/host-facts.md`. Per-upgrade state (strategy tables, gates, negative claims) lives in `docs/upgrades/<tag>-plan.md` under `upgrade_contract: selfhost-upgrade/v1`. Where this SOP and the skill disagree on ordering (commit vs. restart vs. migrate), the skill wins.
 
 ## Guidance
 
@@ -53,11 +55,13 @@ This typically includes files like `AGENTS.md` with local agent instructions, `.
 Attempt the merge with `--no-commit --no-ff` to see all conflicts without finalizing anything.
 
 ```bash
-# Fetch latest upstream
-git fetch origin
+# Fetch latest upstream (tags included)
+git fetch origin --tags
 
-# Attempt merge without committing
-git merge origin/main --no-commit --no-ff
+# Merge the release TAG, not origin/main — the tag is the exact release
+# boundary; origin/main may sit past it (2026-08-17: tag-only merges are
+# the standing practice, per the upgrade skill Phase 3)
+git merge <target-tag> --no-commit --no-ff
 ```
 
 If the conflicts look too severe or you are not ready, abort cleanly and restore your stash:
@@ -87,8 +91,8 @@ Not all conflicts deserve the same resolution approach. Categorize each conflict
 
 ```bash
 # Accept upstream version for refactored files
-git checkout origin/main -- packages/ui/components/common/actor-avatar.tsx
-git add packages/ui/actor-avatar.tsx
+git checkout <target-tag> -- packages/ui/components/common/actor-avatar.tsx
+git add packages/ui/components/common/actor-avatar.tsx
 ```
 
 Then update your local features that depend on the old API (see Step 5).
@@ -176,12 +180,26 @@ Run every verification step in order. Do not stop at the first pass.
 # Backend: Go compiles cleanly
 cd server && go build ./... && cd ..
 
+# Backend: vet compiles the TEST files go build skips — catches fork-only
+# test files still calling an upstream-changed signature (arity drift), and
+# auto-merged duplicate blocks (v0.4.20/v0.4.25 both caught live here)
+cd server && go vet ./... && cd ..
+
+# Backend: execution rung — go build/go vet never EXECUTE code, so
+# package-init panics (e.g. cobra/pflag double flag registration) pass
+# both. Run go test for at least the packages fork commits touched
+# (cheap with -run filters). Full Go suite stays Docker-gated on this host.
+cd server && go test ./cmd/multica/ -count=1 && cd ..
+
 # Database: apply any migrations the merge brought in. cmd/migrate reads
 # DATABASE_URL (it defaults to localhost:5432/multica:multica — wrong for a
 # self-hosted instance on :5433, so pass the value from .env). Confirm the
 # run reaches "Done." with no unapplied migrations left; an upstream
 # migration-number reshuffle can abort the run midway. See
 # docs/solutions/workflow-issues/unapplied-migrations-after-upstream-upgrade.md
+# (upgrade-skill flow: migrations run in Phase 6, after the merge commit
+# and a pg_dump backup — migration is the irreversible step gated on user
+# confirmation; the SOP keeps it here for the generic flow)
 cd server && DATABASE_URL="<DATABASE_URL from .env>" go run ./cmd/migrate up && cd ..
 
 # TypeScript: no type errors introduced by the merge
@@ -221,6 +239,8 @@ go build -C server -o bin/server -ldflags "-X main.version=$BASELINE" ./cmd/serv
 Use the **clean tag** — `git describe` on a checkout past the tag yields `vX.Y.Z-NNN-g<hash>`, and the provenance sanitizer (`officialBaseline`) deliberately maps `dev`, `-dirty`, and describe-suffixed values to empty, which `omitempty` drops from `/api/config`. That silent-failure is by design (never present a hash/"dev" as a release baseline), but it means a forgotten re-stamp looks like "backend broken" while the service is healthy. Verify: `curl /api/config` returns `server_version`, and the Help menu shows both rows. Full reasoning: `docs/solutions/workflow-issues/version-reporting-after-upstream-upgrade.md`.
 
 ### Step 8: Restart services and verify
+
+> **Ordering (2026-08-17).** In the upgrade-skill flow the merge commit (Step 10) is created BEFORE this restart and before migrations: Phase 5 ends by committing, then Phase 6 runs backup → migrate → re-stamp → restart. Reason: the version re-stamp resolves the release tag from HEAD (`git describe` needs the tag reachable through the merge commit — commit-first, see the skill's Phase 5→6), and DB migration/restart are the irreversible steps gated on user confirmation. The Example below already orders commit before restart.
 
 ```bash
 launchctl kickstart gui/$(id -u)/com.fengzhao.multica-backend
@@ -302,29 +322,32 @@ git branch main-backup-v0.3.42 main
 git stash push -m "pre-upgrade"
 
 # 3. Fetch and preview
-git fetch origin
-git merge origin/main --no-commit --no-ff
+git fetch origin --tags
+git merge v0.3.42 --no-commit --no-ff
 
 # 4. List and assess conflicts
 git diff --name-only --diff-filter=U
-# → packages/ui/actor-avatar.tsx, server/cmd/server/router.go,
+# → packages/ui/components/common/actor-avatar.tsx, server/cmd/server/router.go,
 #   packages/views/editor/readonly-content.test.tsx, ...
 
 # 5. Resolve per-file (repeat for each conflict)
-git checkout origin/main -- packages/ui/components/common/actor-avatar.tsx && git add packages/ui/actor-avatar.tsx
+git checkout v0.3.42 -- packages/ui/components/common/actor-avatar.tsx && git add packages/ui/components/common/actor-avatar.tsx
 # ... manually resolve Config struct, test files, SQL files ...
 
 # 6. Adapt local features
 # Update AvatarChip size={14} -> size="xs"
 # Update Avatar shape="rounded-square" -> shape="circle"
 
-# 7. Install + verify (apply migrations between build and tests)
+# 7. Install + verify
 pnpm install
 cd server && go build ./... && cd ..
-cd server && DATABASE_URL="<from .env>" go run ./cmd/migrate up && cd ..
+cd server && go vet ./... && cd ..
+cd server && go test ./cmd/multica/ -count=1 && cd ..
 pnpm typecheck
 pnpm test
 pnpm build
+# (migrations deferred to after the commit in the upgrade-skill flow:
+#  backup -> migrate -> re-stamp -> restart)
 
 # 8. Commit
 git commit -m "merge(upstream): upgrade to v0.3.42 ..."

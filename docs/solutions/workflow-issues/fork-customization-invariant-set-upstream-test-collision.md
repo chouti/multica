@@ -1,6 +1,7 @@
 ---
 title: "A fork customization is an invariant set across code + tests + every locale — 3-way merge is blind to fork-code x upstream-test collisions; only running upstream's new tests surfaces them"
 date: 2026-08-07
+last_updated: 2026-08-17
 category: workflow-issues
 module: upstream-upgrade-merge
 problem_type: workflow_issue
@@ -70,7 +71,7 @@ Apply this on **every upstream upgrade / sync merge** of the self-host fork, dur
 
 Signals that a file or feature is **fork-additive** (and therefore needs its invariant set re-validated, not assumed preserved):
 
-- It appears in the fork but not in upstream's tree at the merge-base, or it carries an explicit `// Fork customization:` comment (e.g. `packages/views/issues/components/issue-detail.tsx:2541`).
+- It appears in the fork but not in upstream's tree at the merge-base, or it carries an explicit `// Fork customization:` comment (e.g. `packages/views/issues/components/issue-detail.tsx:2640`).
 - It adds keys present only in some locale bundles (surfaced by the `EN covers every <locale> key` parity assertion).
 - It has a fork-specific test block asserting behavior upstream's suite does not know about.
 
@@ -89,7 +90,7 @@ The fork adds a standalone tappable `<IssueIdentifierBadge issue={issue} .../>` 
 
 The fork's badge-plus-standalone-title created a *second* bare-title node, so `getByText` threw "Found multiple elements" and 5 tests failed. The 3-way merge compiled clean — the fork had edited `issue-detail.tsx`, upstream had edited `issue-detail.test.tsx`, neither side conflicted textually. **Only running upstream's new test exposed it.** (session history) All five failures shared that single root cause — none were actually about composer/sticky/subscribe despite first appearances.
 
-Resolution (user-chosen, "badge + 合并文本"): keep the breadcrumb leaf as upstream's single merged `{identifier} {title}` text node (`packages/views/issues/components/issue-detail.tsx:2416-2418`), and relocate the badge above the title in the body (`packages/views/issues/components/issue-detail.tsx:2545-2550`), under an explicit `// Fork customization:` comment (`:2541-2544`) recording *why* — "the breadcrumb leaf must stay a single `{identifier} {title}` text node so upstream's `getByText(title)` uniqueness probes keep resolving to the H1." The fork's own leaf-link test was updated to the new contract, asserting the merged-leaf regex `/TES-1\s+Implement authentication/` and the badge-by-role separately (`packages/views/issues/components/issue-detail.test.tsx:791-798`). The merge commit records this: "Phase 5 relocated the badge from the breadcrumb leaf to above the title so upstream's title-uniqueness test probes resolve to the H1 (badge customization preserved, position moved)." Result: issue-detail suite 59/59.
+Resolution (user-chosen, "badge + 合并文本"): keep the breadcrumb leaf as upstream's single merged `{identifier} {title}` text node (`packages/views/issues/components/issue-detail.tsx:2463-2509`), and relocate the badge above the title in the body (`packages/views/issues/components/issue-detail.tsx:2645-2650`), under an explicit `// Fork customization:` comment (`:2640-2644`) recording *why* — "the breadcrumb leaf must stay a single `{identifier} {title}` text node so upstream's `getByText(title)` uniqueness probes keep resolving to the H1." The fork's own leaf-link test was updated to the new contract, asserting the merged-leaf regex `/TES-1\s+Implement authentication/` and the badge-by-role separately (`packages/views/issues/components/issue-detail.test.tsx:794-805`). The merge commit records this: "Phase 5 relocated the badge from the breadcrumb leaf to above the title so upstream's title-uniqueness test probes resolve to the H1 (badge customization preserved, position moved)." Result: issue-detail suite 59/59.
 
 (session history) The generalizable move: when a fork customization and a new upstream constraint are mutually exclusive on the same DOM node, **moving the customization to an adjacent node the constraint doesn't cover beats deleting one or the other.** And because the fork had *also* written its own test asserting "badge sits beside the title inside the same link," that fork test had to be updated to the new structure — demonstrating a fork customization is a code+test bundle, not code alone.
 
@@ -99,7 +100,7 @@ Resolution (user-chosen, "badge + 合并文本"): keep the breadcrumb leaf as up
 
 After the upgrade restored fork-only keys to the non-EN locales, this assertion surfaced roughly 80 fork-only keys lacking English coverage (9 parity failures) — i.e. it enumerated the fork's locale-only surface automatically. That forced the live-vs-dead triage:
 
-- **LIVE** — `execution_log.view_run` is referenced at `packages/views/issues/components/comment-card.tsx:622` and `:964`; the `welcome_after_onboarding.*` block backs the fork's own live Mika/welcome page at `packages/views/workspace/welcome-after-onboarding.tsx:163-184`. These were restored and given English coverage (now present at `packages/views/locales/en/issues.json:527-528` and `packages/views/locales/en/onboarding.json`).
+- **LIVE** — `execution_log.view_run` is referenced at `packages/views/issues/components/comment-card.tsx:622` and `:964`; the `welcome_after_onboarding.*` block backs the fork's own live Mika/welcome page at `packages/views/workspace/welcome-after-onboarding.tsx:163-184`. These were restored and given English coverage (now present at `packages/views/locales/en/issues.json:535` and `packages/views/locales/en/onboarding.json`).
 - **DEAD** — keys with no remaining code reference were deleted. The merge commit names them: "Phase 5 then pruned genuinely dead keys (token-usage sidebar panel + runtime_aside + step_header — upstream retired those surfaces) and completed EN coverage of the live fork keys (parity gate)."
 
 The parity suite did double duty: it detected the fork-only keys *and* enforced that the kept ones are translated across all four languages. (session history) The back-fill surfaced ~80 missing keys (6 issues + 72 onboarding + 0 layout); 78 had traceable English values in fork `main`'s EN, and the remaining 2 were genuine upstream keys. These were confirmed to be live fork features (Mika onboarding welcome page, runtime aside, token-usage panel) rather than orphans — parity's design intent is exactly to force EN coverage of fork-only keys. After back-fill, parity passed 166/166.

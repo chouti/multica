@@ -1,6 +1,7 @@
 ---
 title: "Three-way merge silently keeps the fork's function signature when upstream adds a parameter to the same function — only go build catches it"
 date: 2026-08-03
+last_updated: 2026-08-17
 category: "workflow-issues"
 module: "git"
 problem_type: "workflow_issue"
@@ -42,21 +43,21 @@ git diff <base>..<tag> -- <file> | grep "func.*<name>\|<name>("
 
 If upstream both touched the signature and added a call site, you have a Strategy D double-signature situation: the merged result needs a **manual merge of the two parameter axes**, not a side pick. New upstream call sites are the smoking gun — they are compiled against upstream's parameter list, so they will reference parameters your fork signature doesn't have (or pass them positionally into the wrong slots).
 
-**2. Merge the two parameter axes orthogonally — keep BOTH, don't pick a side.** The correct resolution concatenates the new parameters from each side onto one signature. For this incident the merged signature is (`server/internal/handler/comment.go:1974`):
+**2. Merge the two parameter axes orthogonally — keep BOTH, don't pick a side.** The correct resolution concatenates the new parameters from each side onto one signature. For this incident the merged signature is (`server/internal/handler/comment.go:1984`):
 
 ```go
 func (h *Handler) triggerTasksForComment(ctx context.Context, issue db.Issue, comment db.Comment, parentComment *db.Comment, actorType, actorID, originatorUserID, delegationAuthorityUserID string, suppressAgentIDs []pgtype.UUID, skillMentionAgents map[string][]pgtype.UUID) []CommentTriggerOutcome {
 ```
 
-Note both upstream's `delegationAuthorityUserID string` and the fork's `skillMentionAgents map[string][]pgtype.UUID` are present. Inside the body the new parameter must be threaded into the options struct that already carries the field — here `commentTriggerComputeOptions.AutopilotDelegationAuthorityUserID` (`comment.go:1565`), set at `comment.go:1985`:
+Note both upstream's `delegationAuthorityUserID string` and the fork's `skillMentionAgents map[string][]pgtype.UUID` are present. Inside the body the new parameter must be threaded into the options struct that already carries the field — here `commentTriggerComputeOptions.AutopilotDelegationAuthorityUserID` (`comment.go:1565`), set at `comment.go:1995`:
 
 ```go
 AutopilotDelegationAuthorityUserID: delegationAuthorityUserID,
 ```
 
 **3. Check whether the auto-merge overwrote upstream's *new logic* near the fork's old lines.** A silent pick doesn't only drop parameters — it can revert upstream's newly added body lines back to the fork's older version. In this incident the merge used the fork's older `UpdateComment` body and dropped upstream's new MUL-4857 delegation-resolution logic. It had to be ported back:
-- `CreateComment` resolves the authority via `autopilotDelegationAuthorityFromRequest` (`server/internal/handler/agent_access.go:275`, called at `comment.go:1929`).
-- `UpdateComment` resolves it via `autopilotDelegationAuthorityFromComment` (`server/internal/handler/agent_access.go:291`, called at `comment.go:3545`).
+- `CreateComment` resolves the authority via `autopilotDelegationAuthorityFromRequest` (`server/internal/handler/agent_access.go:275`, called at `comment.go:1939`).
+- `UpdateComment` resolves it via `autopilotDelegationAuthorityFromComment` (`server/internal/handler/agent_access.go:291`, called at `comment.go:3565`).
 
 **4. Update ALL call sites, including the new upstream one and every test.** A Go signature change does not produce a textual conflict, but every caller must compile against the new arity:
 - The new upstream call site `quick_action.go:917` passes `delegationAuthority` (a `string`) into the new parameter and appends `nil` for the fork's `skillMentionAgents` (quick actions have no @skill designation):
@@ -105,13 +106,13 @@ The string `delegationAuthority` landed in the fork signature's `suppressAgentID
 Both parameters are kept; the new one is threaded into the options struct:
 
 ```go
-// server/internal/handler/comment.go:1974
+// server/internal/handler/comment.go:1984
 func (h *Handler) triggerTasksForComment(ctx context.Context, issue db.Issue, comment db.Comment, parentComment *db.Comment, actorType, actorID, originatorUserID, delegationAuthorityUserID string, suppressAgentIDs []pgtype.UUID, skillMentionAgents map[string][]pgtype.UUID) []CommentTriggerOutcome {
 	// ...
 	triggers, targets := h.computeCommentAgentTriggers(ctx, issue, comment.Content, parentComment, actorType, actorID, commentTriggerComputeOptions{
 		ExcludeTriggerCommentID:            comment.ID,
 		OriginatorUserID:                   originatorUserID,
-		AutopilotDelegationAuthorityUserID: delegationAuthorityUserID, // comment.go:1985
+		AutopilotDelegationAuthorityUserID: delegationAuthorityUserID, // comment.go:1995
 	})
 	// ...
 }
@@ -122,10 +123,10 @@ The options struct field already existed on the merged tree (`comment.go:1565`),
 The ported-back upstream delegation resolution at the two trusted boundaries:
 
 ```go
-// CreateComment — comment.go:1929
+// CreateComment — comment.go:1939
 delegationAuthority := h.autopilotDelegationAuthorityFromRequest(r, issue, authorType, authorID)
 
-// UpdateComment — comment.go:3545
+// UpdateComment — comment.go:3565
 delegationAuthority := h.autopilotDelegationAuthorityFromComment(r.Context(), issue, comment)
 ```
 

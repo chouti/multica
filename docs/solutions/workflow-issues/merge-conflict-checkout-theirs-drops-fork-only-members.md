@@ -1,6 +1,7 @@
 ---
 title: "git checkout --theirs whole-file overwrite silently drops fork-only members — use git merge-file + a loss scan"
 date: 2026-08-07
+last_updated: 2026-08-17
 category: workflow-issues
 module: upgrade-merge-conflict-resolution
 problem_type: workflow_issue
@@ -18,7 +19,7 @@ tags: [merge-conflict, git-merge-file, checkout-theirs, fork-upgrade, locale-key
 
 ## Context
 
-This fork (the self-host Multica instance) tracks the upstream repository `multica-ai/multica` and periodically merges an upstream release tag into `main`, preserving a set of local customizations. During the **v0.4.18 → v0.4.20** upgrade (merge commit `e4b0277ba`, a true two-parent merge of local `c06fd6583` and upstream tag `93342d04a`; both are local-fork commits on this self-host checkout — verified ancestors of `HEAD`, not yet pushed to `origin`), 42 files conflicted and had to be resolved by hand. The full per-file record lives in `docs/upgrades/v0.4.20-plan.md` (Phase 4 "Decision point 2 — locale JSONs" and Phase 5) and `docs/customizations.md` ("Last upgrade — v0.4.18 → v0.4.20").
+This fork (the self-host Multica instance) tracks the upstream repository `multica-ai/multica` and periodically merges an upstream release tag into `main`, preserving a set of local customizations. During the **v0.4.18 → v0.4.20** upgrade (merge commit `e4b0277ba`, a true two-parent merge of local `c06fd6583` and upstream tag `93342d04a`; both are local-fork commits on this self-host checkout — verified ancestors of `HEAD`, not yet pushed to `origin`), 42 files conflicted and had to be resolved by hand. The full per-file record lives in `docs/upgrades/v0.4.20-plan.md` (Phase 4 "Decision point 2 — locale JSONs" and Phase 5) and `docs/customizations.md` (the per-upgrade "Last upgrade" section for v0.4.18 → v0.4.20).
 
 Two of those conflict resolutions were done with `git checkout --theirs <file>` — a whole-file overwrite that takes the upstream side of the merge verbatim. Both times this **silently destroyed fork-only members that upstream lacked**, and both times nothing in the merge output flagged the loss:
 
@@ -111,7 +112,7 @@ A whole-file `--theirs` on a fork-additive file fails **silently**, which is the
 
 - The generalizable principle, recorded in the upgrade plan's durable lessons: a fork customization is an **invariant set** spanning code + tests + every locale. Any resolution strategy that operates on one file at a time without a completeness check across that set can drop a member the rest of the set still depends on. The loss scan is what turns "we think we kept everything" into a verifiable assertion `flat(fork) − flat(now) == ∅`.
 
-- This doc's corrective also fixes an active hazard in the knowledge store: `merge-feature-branch-customized-main.md` Step 1 still recommends `git checkout --theirs <file>` for "both added" component files with no caveat. That recommendation is unsafe for fork-additive files and is scoped/corrected by this doc (see Related).
+- This doc's corrective also resolved a hazard that existed in the knowledge store: `merge-feature-branch-customized-main.md` Step 1 originally recommended `git checkout --theirs <file>` for "both added" component files with no caveat. That recommendation was unsafe for fork-additive files; its Step 1 now carries a warning block-quote scoping it to zero-fork-addition files and cross-links this doc (refresh landed 2026-08-07; the contradiction is resolved).
 
 ## When to Apply
 
@@ -174,10 +175,10 @@ The merged result retained the fork's additive surface — `EMPTY_BATCH_IMPORT_R
 
 ## Related
 
-- `docs/solutions/workflow-issues/merge-feature-branch-customized-main.md` — **direct contradiction / refresh target.** Its Step 1 recommends `git checkout --theirs <file>` for "both added" files with no fork-only-member caveat. This doc corrects and scopes that recommendation.
+- `docs/solutions/workflow-issues/merge-feature-branch-customized-main.md` — formerly a direct contradiction; its Step 1 now carries the fork-additive warning block-quote and cross-links this doc (correction landed 2026-08-07). The feature-branch flow remains a genuinely different scenario (merging an internal branch, not an upstream tag).
 - `docs/solutions/workflow-issues/safe-upstream-upgrade-with-local-customizations.md` — the canonical upgrade-workflow SOP; this doc is a concrete conflict-resolution tactic that plugs into its per-file resolution step.
 - `docs/solutions/workflow-issues/upstream-type-scale-refactor-fork-only-files-blindspot.md` — sibling fork-only-loss learning, different mechanism (merge never visits fork-only *files*, caught by a guard test) vs. this doc's *active overwrite* of fork-only *members*. Same "fork-only content is structurally invisible to text-merge" theme.
 - `docs/solutions/workflow-issues/upstream-orthogonal-signature-double-change-blindspot.md` and `upstream-single-sided-fork-param-convergence-merge.md` — the Strategy D silent-merge family (3-way merge loses one side's intent at the signature level); different detection surface (`go build`) than this doc's loss scan.
 - `docs/solutions/workflow-issues/run-typecheck-after-upstream-merge.md` — adjacent post-merge verification gate; this doc adds the complementary fork-only-member loss scan for the resolution paths typecheck cannot see (locale JSON, dropped exports still typecheck).
-- `docs/solutions/workflow-issues/merge-keep-both-json-trailing-comma-trap.md` — the **next-step complement**: once you correctly choose keep-both inside a locale-JSON conflict (instead of `--theirs`), the fork block's last entry may lack a trailing comma, so the union is invalid JSON until you insert the comma and validate with `json.tool`. This doc governs *which* resolution to pick; that one covers the syntax seam *after* picking keep-both.
+- `docs/solutions/workflow-issues/merge-keep-both-shared-context-brace-trap.md` — the **next-step complement** (its JSON-variant section absorbed the former `merge-keep-both-json-trailing-comma-trap.md` on 2026-08-17): once you correctly choose keep-both inside a conflict (instead of `--theirs`), positional syntax — a fork block's last entry missing its trailing comma, or closing braces drawn outside the conflict block — can make the union invalid until repaired and validated with the language's authoritative tool (`json.tool` / `gofmt`). This doc governs *which* resolution to pick; that one covers the syntax seam *after* picking keep-both.
 - Process artifacts: `docs/upgrades/v0.4.20-plan.md` (Phase 4 "Decision point 2" + Phase 5 loss-scan record), `docs/customizations.md` ("Last upgrade — v0.4.18 → v0.4.20").

@@ -1,6 +1,7 @@
 ---
 title: "Two auto-merge collision classes merge-tree and file-level audits miss — same-symbol-different-region duplicate (caught by tsc) and fork-only test file vs upstream signature drift (caught by go vet, not go build)"
 date: 2026-08-14
+last_updated: 2026-08-17
 category: workflow-issues
 module: upstream-upgrade-merge
 problem_type: workflow_issue
@@ -26,7 +27,7 @@ tags: [upstream-upgrade, auto-merge, three-way-merge, merge-tree-blindspot, type
 
 (session history) 这两类并非孤立：在 v0.4.18→v0.4.20 升级里，**同一个 fork-only 测试文件** `task_source_task_id_test.go` 就因 `CompleteTask`/`FailTask` 签名漂移被 `go vet` 抓过一次，并被 `negative-claim-must-prove-user-invariant.md` 第 106 行引用为 `go vet` 抓陈旧测试调用点的范例。所以 Class 2 在 v0.4.25 是**复发**，不是首例；Class 1（同符号异区重复）则是首次被形式化记录。本仓库的 collision-family 文档（`negative-claim`、`fork-customization-invariant-set`、`upstream-orthogonal-signature-double-change-blindspot`）已各自覆盖了相邻的盲区，本文补上"编译器/linter 抓、merge-tree 抓不到"这一层。
 
-两类碰撞的共同主线是：**auto-merge 在文件级 / hunk 级重叠上是可靠的，但它看不见"语义级"的重复与签名漂移。** `git merge-tree` 只看文本重叠；文件级人工审计看的是文件和 hunk；两者都无法感知 (a) 同一个导出符号在同一个文件的两个不相交区域被各自添加，或 (b) 一个 fork-only 文件调用了一个被 upstream 改了签名的函数。Phase 5 的全量编译门（`pnpm typecheck` 与 `go vet`）是唯一可靠的兜底。
+两类碰撞的共同主线是：**auto-merge 在文件级 / hunk 级重叠上是可靠的，但它看不见"语义级"的重复与签名漂移。** `git merge-tree` 只看文本重叠；文件级人工审计看的是文件和 hunk；两者都无法感知 (a) 同一个导出符号在同一个文件的两个不相交区域被各自添加，或 (b) 一个 fork-only 文件调用了一个被 upstream 改了签名的函数。Phase 5 的全量编译门（`pnpm typecheck` 与 `go vet`）是这两类的可靠兜底（2026-08-17 补：编译门之下还有执行级 rung，见 Guidance 末节）。
 
 ## Guidance
 
@@ -62,13 +63,19 @@ git grep -n '\.CompleteTask(\|\.FailTask(' -- 'server/'
 
 关键陷阱：`go build ./...` **不编译测试文件**，所以它能编译通过却让 `go vet ./...`（或直接跑测试）炸掉。也就是说，Phase 5 里"build 过了"不能当作"签名兼容"的证据，必须跑 `go vet`。尤其是 **fork-only 测试文件**——upstream 改签名时会更新它自己仓库里的所有测试调用点，但够不到一个它根本不存在的 fork 测试文件，3-way 合并对这种跨文件失配无能为力。
 
-### Phase 5 全量编译门是最终兜底
+### Phase 5 全量编译门是编译语义的兜底（非运行级兜底）
 
 无论审计做得多细，把 `pnpm typecheck` 和 `go vet ./...` 当成不可跳过的 Phase 5 闸门。它们分别捕获：
 - `pnpm typecheck` → Class 1（TS2300 `Duplicate identifier`、TS2451 `Cannot redeclare block-scoped variable`）。
 - `go vet ./...` → Class 2（`not enough arguments in call to ...`）。注意 `go build ./...` 抓不到，因为它不编译 `*_test.go`。
 
 (session history) 这正是 upgrade skill 的 Phase 5 清单在 v0.4.20 之后从 5 项扩到 7 项的原因——新增了 `go vet` 和 `sqlc`，`go vet` 被显式列为"抓 test 签名漂移 + auto-merge 重复块"的唯一标准门。
+
+### 执行级 rung —— 编译门之下的最低档（2026-08-17 补）
+
+上述阶梯止于编译门，但 `go build`（不编译测试）与 `go vet`（编译测试但不执行）对**运行期**缺陷双盲：package-init panic（如 pflag flag 双注册）、只有执行测试二进制才会暴露的行为漂移，两道门都放行。`docs/solutions/runtime-errors/duplicate-pflag-registration-init-panic-invisible-to-static-gates.md` 记录了完整案例——fork CLI 的 invite flag 双注册在 build/vet 双绿状态下存活 39 天，唯一暴露方式是实际执行 `go test`。升级审计应对至少 fork 改动过的包（或 /tmp 的 merged-tree 导出）实际执行 `go test`，把"编译过"升级为"执行过"；CONCEPTS.md 的 **Verification Gate Ladder** 词条收录了完整阶梯与三种失效模式。
+
+同一案例的另一半教训是**无人读的红灯等于不存在**：fork 远端 CI（`.github/workflows/ci.yml` → `scripts/test-go.sh --race`）2026-07-10 的 run 29082363133 就以该 panic 大红失败，一个多月无人查看；此后 push 停止、流程转纯本地，执行级门彻底退出例行视野。执行级门要么在本地例行跑、要么纳入被查看的 CI 回路——两者同时缺位时，阶梯的最低档是空的。
 
 ## Why This Matters
 
@@ -84,7 +91,7 @@ git grep -n '\.CompleteTask(\|\.FailTask(' -- 'server/'
 - 任何 upstream merge 中，fork 和 upstream 在**同一个文件**里各自添加了代码（哪怕改动落在完全不同的行区间）。→ 跑检测 1。
 - 任何 upstream merge 中，upstream 在 merge range 内**改了函数/方法签名**（参数增删、参数顺序变化），而 fork 有自己的测试文件或调用点。→ 跑检测 2，且调用者扫描必须包含 `*_test.go`，尤其是 fork-only 测试文件。
 - 任何 merge range 里 upstream 新增/删除了一个被广泛调用的导出符号时，按同样的"两侧 add-list 求交集"思路扩展扫描。
-- Phase 5 永远跑 `pnpm typecheck` + `go vet ./...`；不要因为"`go build` 过了"就认为签名兼容，也不要用 `git merge-tree` 的零冲突输出当作语义干净的证据。
+- Phase 5 永远跑 `pnpm typecheck` + `go vet ./...`；不要因为"`go build` 过了"就认为签名兼容，也不要用 `git merge-tree` 的零冲突输出当作语义干净的证据。编译门之下还有执行级 rung：对 fork 改动过的包（尤其 CLI 包）实际执行 `go test`——build/vet 双绿不证明测试能跑。
 
 ## Examples
 
@@ -101,10 +108,10 @@ TS2451 Cannot redeclare block-scoped variable 'SkillSchema'.
 
 修复（已落在当前树，merge commit `2ca50e006`）：删掉 upstream 那一份重复定义，保留 fork 的定义。当前树里每种符号只剩唯一定义，且 fork 版本位于 `BatchImportResponseSchema` 之前，引用能正确解析：
 
-- `packages/core/api/schemas.ts:1298` — `const SkillFileSchema`（唯一）。
-- `packages/core/api/schemas.ts:1307` — `export const SkillSchema`（唯一）。
-- `packages/core/api/schemas.ts:1325` — `BatchImportResponseSchema`，在 `:1329` 通过 `skills: z.array(SkillSchema).default([])` 引用 `SkillSchema`（验证保留 fork 版本能正确解析）。
-- `packages/core/api/schemas.ts:1333` — `export const EMPTY_SKILL`（唯一）。
+- `packages/core/api/schemas.ts:1338` — `const SkillFileSchema`（唯一）。
+- `packages/core/api/schemas.ts:1347` — `export const SkillSchema`（唯一）。
+- `packages/core/api/schemas.ts:1365` — `BatchImportResponseSchema`，在 `:1369` 通过 `skills: z.array(SkillSchema).default([])` 引用 `SkillSchema`（验证保留 fork 版本能正确解析）。
+- `packages/core/api/schemas.ts:1373` — `export const EMPTY_SKILL`（唯一）。
 
 附带把 import 块里出现两次的 `Skill` import 去重。行为上无损：fork 的 `.default()` 与 upstream 的 `.optional().default()` 在 zod 里运行时等价，保留 fork 版本不丢任何行为。
 
@@ -140,5 +147,6 @@ Phase 1 审计当时确实扫了非测试调用方（`server/internal/handler/da
 - `docs/solutions/workflow-issues/run-typecheck-after-upstream-merge.md` — Class 1 的检测器。那篇唯一例子是"声明被丢"（auto-merge drop），本文 Class 1 是反面"声明重复"（both-add）；同一道 `tsc` 门，互补的碰撞形态。
 - `docs/solutions/workflow-issues/upstream-type-scale-refactor-fork-only-files-blindspot.md` — 提供 meta 框架（"文本级 3-way 合并对跨区域/跨文件语义失明，模式可推广"）；本文两类是该推广的两个新层（TS 重复标识层 / Go fork-only 测试层）。
 - `docs/solutions/workflow-issues/safe-upstream-upgrade-with-local-customizations.md` — 10 步升级 SOP（Strategy D 首次定义于 Step 4）；本文两条检测规则可插回该 SOP 的审计 + 验证步骤。
+- `docs/solutions/runtime-errors/duplicate-pflag-registration-init-panic-invisible-to-static-gates.md` — 阶梯的最低档：package-init panic 对 build/vet 双盲，只有执行 `go test` 暴露；并把本文的"编译门兜底"模型补全为完整 gate ladder（含无人读的 CI 红灯这一失效模式）。
 - Merge commit `2ca50e006` — 两类修复都已落在当前树。
 - auto memory [claude] `feedback_upgrade_audit_collision_gaps` — 同期记录这两类碰撞的 auto memory 笔记（补充上下文，非首要证据；以本文件 + 已验证树为准）。

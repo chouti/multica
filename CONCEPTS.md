@@ -53,6 +53,27 @@ The explicit "pick an agent" action attached to a `@skill` mention chip in the c
 
 ---
 
+## Fork Maintenance
+
+Vocabulary of maintaining this self-host fork against its upstream — the upgrade loop, the merge-resolution patterns, and the artifacts that carry state between sessions.
+
+### Customization Ledger
+The persistent record of every customization this fork carries relative to upstream, keyed by feature with its upstream-PR status and the files it touches. Rows live in status tables — open PR, adopted upstream, closed, withdrawn, pure-local — and move between them as upstream merges or rejects. A row that lags reality is itself a hazard in both directions: an un-recorded cluster is invisible to merge planning, and a cluster recorded as an open fork PR that upstream has since merged leaves the fork carrying a redundant "ghost" copy — ledger status is knowledge that expires and must be re-verified against the tracker every upgrade.
+
+### Upgrade Plan Artifact
+The resumable per-upgrade record that makes a long, interruptible upgrade safe to hand off: a single-value phase state machine (audit, preview, resolve, verify, gates, record, done), a checklist of irreversible-step gates, and adversarially-verified negative claims — each "we proved upstream is NOT doing X" entry carries the raw command that confirmed it. Phase values advance only as a phase genuinely completes so the artifact always reflects what is true on disk; the irreversible steps (DB migration, service restart) unlock only from the completed-verification state, never from intent, and the merge commit is recorded before them because the version re-stamp resolves the release tag from committed history.
+
+### Strategy D (orthogonal-signature merge)
+The merge-resolution pattern for when fork and upstream each extend the SAME function signature along independent axes — the fork adds a parameter upstream never had, upstream adds a different one or changes the return. The resolution is the UNION of both extensions, never either side: picking a side silently drops the other axis's functionality with no conflict marker. Mirror case: when upstream fully refactors the function and drops the fork's axis entirely, auto-merge quietly keeps the fork side and the danger moves from compilation to behavior — detected by the count asymmetry (symbol present at HEAD, absent in the upstream tag), not by any build gate.
+
+### Fork Invariant Set
+The principle that one fork customization is not one code change but a set of members spanning code + tests + every locale file, and every merge resolution must preserve the whole set. The unit of preservation is the fork-only member — a locale key, client method, route, or export that exists only on the fork side; whole-file conflict resolutions (`--theirs` / `--ours`) delete them silently and without a build failure. Completeness is verified by the **Loss Scan**, not by the absence of conflict markers; upstream's own tests collide with the set only at test time, so a merge that compiles clean has not yet proven the set intact.
+
+### Loss Scan
+The completeness check that turns "we think we kept everything" into a verifiable assertion: deep-flatten the fork's pre-merge state (every JSON key, every method/export name) and subtract the post-resolution state — the result must be empty. Run after every conflict resolution, not only after side-picking: a careful hand-merge drops a fork-only member just as silently as `--theirs`. Missing live members are restored add-only first; genuinely dead members (upstream retired the feature) are pruned only with code-reference proof.
+
+---
+
 ## Agent Access
 
 ### AccessScope
@@ -67,6 +88,9 @@ The principle that any value (metric, count, classification, judgment) the spec 
 
 ### Deterministic vs Self-Judgment
 The architectural distinction between a value derived from a defined algorithm (deterministic, reproducible across reruns) and a value produced by the agent's own LLM judgment (self-judgment, varies with context, path, and rerun state). The boundary is the operator's defense against drift: anything that a downstream reader or auditor could ask "why this number?" about must live on the deterministic side; only free-form narrative summaries whose wording is allowed to vary belong on the self-judgment side. See `docs/solutions/workflow-issues/agent-script-as-source-of-truth.md` for the worked example where this distinction turned noisy reports into stable ones.
+
+### Verification Gate Ladder
+The ordered levels of automated verification a change can pass through — compile (typecheck, build), test-compilation (lint/vet), execution (actually running tests or binaries), and production (health checks, live behavior). Each rung sees strictly more than the rung above it: a defect class invisible at compile level — here an init-time registration panic — can be plain at execution level. Three recurring failure modes: a gate list stabilizes at one rung because its catches keep validating it, so defects below that rung pass indefinitely (a green list proves only what its rungs can see, never that the code runs); a gate that is structurally unavailable on the host — a container-gated test entry on a container-less host — exits the routine silently rather than failing loudly; and a gate that fires outside the watched routine — a CI run whose red result nobody reads — is functionally absent even though it exists and fired. See `docs/solutions/runtime-errors/duplicate-pflag-registration-init-panic-invisible-to-static-gates.md` for the case where all three combined to hide a package-init panic for a month of green upgrades.
 
 ### Edit Layer vs Read Layer
 The architectural distinction between *where a change is written* and *where a runtime reads from*. In multi-replica / multi-runtime systems the two can drift silently — Hermes-local skill copies vs Multica-workspace skill copies, Git branches vs deployed tags, Docker images vs running containers, K8s namespaces vs production routing. Edits to the wrong layer produce no error and no warning; the runtime simply keeps reading its own copy. The discipline is to verify the read layer *before* editing, then edit that same layer, then verify the runtime's view moved. See `docs/solutions/integration-issues/autopilot-reads-workspace-skill-not-hermes-local.md` for the protocol and the 2026-07-29 YUP-470 incident where 17 turns of "已修复" had no autopilot-visible effect.
@@ -87,3 +111,6 @@ The discipline that a verification command written to confirm "no X happened" (n
 - **Script as Source of Truth** and **Deterministic vs Self-Judgment** are the same boundary seen from two sides: the principle names the discipline the spec must enforce, the distinction names the line the agent must not cross.
 - **Edit Layer vs Read Layer** is the orthogonal discipline for change propagation: the layer the operator edits must be the same layer the runtime reads, and verification must compare `updated_at` before and after. Skipping this discipline produces silent drift even when the rule itself is correct.
 - **Invariant vs Proxy Verification** is the audit-phase member of the same verification-discipline family: where **Edit Layer vs Read Layer** governs *where* a change takes effect and **Script as Source of Truth** governs *who* produces a value, **Invariant vs Proxy Verification** governs *what a verification command actually proves* — and notes that the fork's member-preservation defenses cover membership but not call-site reachability, so compile-clean + test-green does not discharge a behavioral claim.
+- **Verification Gate Ladder** names the coverage dimension **Invariant vs Proxy Verification** presupposes: *which rung of gate can even see the claimed invariant*. A claim verified only at compile or test-compilation level has not been tested against the execution-level defects below it, so "the gate list is green" and "the code runs" are different statements.
+- A **Customization Ledger** row enumerates the members of a **Fork Invariant Set**; the **Loss Scan** verifies the set survived a merge; an **Upgrade Plan Artifact** records the per-file strategies — including where **Strategy D (orthogonal-signature merge)** applies — and gates the irreversible steps on completed verification.
+- **Verification Gate Ladder** governs which defect classes the upgrade's gates can even see; **Fork Invariant Set** + **Loss Scan** govern what a merge result must be checked against — membership-and-reachability is a different axis from gate coverage, and a green gate list does not discharge a loss scan.

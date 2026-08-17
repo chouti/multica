@@ -1,6 +1,7 @@
 ---
-title: "KEEP-BOTH merge 冲突的 git「共同 context」陷阱：尾部括号被移出冲突块"
+title: "KEEP-BOTH merge 冲突的位置相关语法陷阱：git「共同 context」括号失衡（Go/gofmt）与末行缺逗号（JSON/json.tool）"
 date: 2026-08-05
+last_updated: 2026-08-17
 category: workflow-issues
 module: git-workflow
 problem_type: workflow_issue
@@ -9,15 +10,20 @@ severity: low
 applies_when:
   - "合并两侧在同一 EOF 位置各追加独立的函数/测试（KEEP-BOTH 类冲突）"
   - "Go 文件 tab 缩进，gofmt 作为 resolve 后的结构校验"
-  - "self-host fork 升级合并 Go 测试/handler 文件"
+  - "合并两侧在同一 JSON 对象尾部各追加独立的 key，fork 侧末行是其 parent 中对象末条 entry（无尾逗号）"
+  - "locale / i18n JSON 文件，json.tool 作为 resolve 后的结构校验"
+  - "self-host fork 升级合并 Go 测试/handler 或 packages/views/locales/*/ 文件"
 root_cause: logic_error
 resolution_type: workflow_improvement
-tags: [git, merge-conflict, gofmt, keep-both, shared-context, braces, upgrade]
+tags: [git, merge-conflict, gofmt, json, keep-both, shared-context, braces, trailing-comma, i18n, locale, upgrade]
 related_components:
   - server/cmd/multica/cmd_issue_test.go
+  - packages/views/locales/en/editor.json
 ---
 
-# KEEP-BOTH merge 冲突的 git「共同 context」陷阱：尾部括号被移出冲突块
+# KEEP-BOTH merge 冲突的位置相关语法陷阱：git「共同 context」括号失衡与末行缺逗号
+
+> 2026-08-17 并入同族变体 `merge-keep-both-json-trailing-comma-trap.md`（已删除，git 历史可查；历史 upgrade plan 中的该文件名引用指向本文）。两变体共享同一根因，v0.4.22 升级实证过**同一个 JSON 冲突块内两者共同触发**（缺右括号 + 缺分隔逗号同时出现，`v0.4.22-plan.md` Phase 4 记录）。
 
 ## Context（背景：本次遇到什么）
 
@@ -79,18 +85,44 @@ gofmt -w server/cmd/multica/cmd_issue_test.go   # 权威修正缩进 + 结构校
 
 `gofmt -w` exit 0 = 括号平衡 + 语法合法；exit 非 0 说明括号还差，按报错位置继续补。**gofmt 在这里同时是格式化工具和结构性语法校验器**——它能修正缩进层级（手补的 tab 不必完美），又因括号失衡而以非零退出报错。
 
+### JSON 变体：末行缺逗号（2026-08-17 并入）
+
+同一根因族在 locale JSON 上的形态（v0.4.20→v0.4.21 升级，4 个 `packages/views/locales/{en,ja,ko,zh-Hans}/editor.json` 各一处冲突）：两侧在锚点行后追加**不同**的 key，fork 侧末行（如 `skill_agent_row_aria`）在 fork parent 中是对象**末条 entry，合法地不带尾逗号**；union 接上 upstream 的 `group_cancelled` 后它不再是末条，逗号缺失原样保留 → JSON 非法。诊断信号：某一侧 block 末行是无逗号的 entry、删标记后 `python3 -m json.tool` 报 `Expecting ',' delimiter`。正确解法同款思路——python slice fork block、**末行补逗号**、接 upstream block、`json.load` 权威校验（locale 含 CJK / `{{name}}` 占位符，不手工拼）：
+
+```python
+m = re.search(r"<<<<<<<[^\n]*\n(?P<fork>.*?)\n=======\n(?P<up>.*?)\n>>>>>>>[^\n]*\n", text, re.S)
+fork_block = m.group("fork")
+if not fork_block.rstrip().endswith(","):      # 关键一步：它即将不再是最末条 entry
+    fork_block = fork_block.rstrip() + ","
+union = fork_block + "\n" + m.group("up")
+# ...替换冲突块后 json.load(open(path)) 校验
+```
+
+```bash
+# 批量校验所有 locale
+for loc in en ja ko zh-Hans; do
+  python3 -m json.tool "packages/views/locales/$loc/editor.json" >/dev/null \
+    && echo "$loc VALID" || echo "$loc INVALID"
+done
+```
+
+**resolve KEEP-BOTH JSON 冲突后必须跑一次 `json.tool`**，不能仅凭肉眼确认标记已删；随后照例跑 loss scan `flat(fork) − flat(now) == ∅`（v0.4.21 实测：fork 94 key → resolved 95，净增 `mention.group_cancelled`，fork 侧零丢失）。
+
 ## Why This Matters（为什么不能简单删标记）
 
 git 的「共同 context」是**字面行匹配**，不是**语义对齐**。fork 函数尾部的 `\t}`（关 if）与 upstream 函数尾部的 `\t\t}`（关内层 if）字面不同，但 git 的 diff 算法在某一侧把它们视为共有的收尾行，划到冲突块外。删标记后这些行留在文件里，却**归属错误**——它们本该只属于其中一个函数的闭合，现在跟在另一个函数后面，导致前者多一层闭合、后者少一层。
 
 Edit 工具对 tab 缩进极其敏感：手工复制含 tab 的 old_string 极易失配。对 Go 这种 tab 缩进语言的大冲突块，python 从文件本身 slice 是可靠路径——唯一手写的部分是「补几个 `\t}`」（缩进层级），而非整块代码。
 
+两个变体的统一根因：**逗号与括号都是位置相关的语法属性**——一条 entry 是否带逗号、一个 `}` 属于哪层闭合，取决于它前后还有什么，而非该行自身。git 的字面行匹配没有位置语法模型，所以「删标记、两侧都留」产出的文本在两种语言里都会以结构错收场，且都只有**语言权威工具**（`gofmt` / `json.tool`）能在 resolve 当场报出来。
+
 ## When to Apply（什么时候遇到）
 
 - **KEEP-BOTH 类 merge conflict**：两侧在同一位置各追加**独立**的函数/测试/方法（函数名不同、被测对象不同、断言不重叠），解法是两个都留。
 - 冲突块**外**紧跟着几行闭合括号（`}`），且缩进看起来「不对劲」。
 - `gofmt -w` / `go build` 在 resolve 后报结构错。
-- self-host fork 升级合并 Go 测试/handler 文件时（本轮 v0.4.18 触发；未来任何 KEEP-BOTH 场景都可能再遇）。
+- **KEEP-BOTH 类 JSON merge conflict**：两侧在同一对象尾部各追加独立的 key；某一侧 block 末行是**不带逗号**的 entry；删标记后 `json.tool` / i18n loader / parity 测试报 parse 错。
+- self-host fork 升级合并 Go 测试/handler 或 locale JSON 时（v0.4.18 Go 变体、v0.4.21 JSON 变体、v0.4.22 两者同块共同触发；未来任何 KEEP-BOTH 场景都可能再遇）。
 
 ## Examples（实例：本轮的真实冲突块结构）
 
@@ -112,9 +144,27 @@ func TestIssueCommentListHelpCarriesReadContract(t *testing.T) {
 
 简单删标记 → fork 函数后跟多余 `}`、upstream 函数缺闭合 → gofmt 报 `expected declaration`。正确解法是识别共同 context 边界、python slice 两函数各自补全、gofmt 校验。
 
+JSON 变体的冲突块形态（v0.4.21，`packages/views/locales/en/editor.json`）：
+
+```
+    "group_search": "Search results",     ← 共同锚点行（两侧都给它补了逗号）
+<<<<<<< HEAD
+    "group_skills": "Skills",
+    ...
+    "skill_agent_row_aria": "Toggle {{name}}"   ← fork 末行：无尾逗号（parent 中它后面是 },）
+=======
+    "group_cancelled": "Cancelled"              ← upstream 追加的单条 entry
+>>>>>>> v0.4.21
+```
+
+简单删标记 → 两条 entry 之间缺逗号 → `json.tool` 报 parse 错。正确解法是 fork block 末行补 `,`、再接 upstream 行、`json.tool` 校验。本轮 4 个 locale 的 `group_cancelled` 译文：en=`Cancelled`、ja=`キャンセル済み`、ko=`취소됨`、zh-Hans=`已取消`。
+
 ## Related（相关文档）
 
 - `docs/solutions/workflow-issues/safe-upstream-upgrade-with-local-customizations.md` — self-host 升级合并的 10 步 SOP；本文是其 resolve 阶段的一个具体陷阱深挖。
-- `docs/solutions/workflow-issues/merge-keep-both-json-trailing-comma-trap.md` — **同族陷阱的 JSON 变体**。同一根因族「git 字面匹配 ≠ 语义对齐（KEEP-BOTH）」，但机制不同：本文是 git 把尾部 `}` 划出冲突块破坏**括号**平衡（python slice + `gofmt` 校验）；那篇是 fork 末行缺**逗号**导致 union 后 JSON 非法（union + 补逗号 + `json.tool` 校验）。不同文件（Go 测试 vs locale JSON）、不同校验器。
+- `merge-keep-both-json-trailing-comma-trap.md` —（2026-08-17 并入本文的 JSON 变体节，文件已删除；历史引用见文首注记）。
+- `docs/solutions/workflow-issues/merge-conflict-checkout-theirs-drops-fork-only-members.md` — 更上层的规则：fork 比 upstream 多成员（locale key）时冲突要用 `git merge-file` 三路合并、绝不 `--theirs`。本文是正确选择 keep-both**之后**撞上的位置语法细节。
+- `docs/solutions/workflow-issues/fork-customization-invariant-set-upstream-test-collision.md` — fork 定制跨代码+测试+每 locale 的不变量集合；本文的 `gofmt`/`json.tool` 校验与 loss scan 是该不变量验证的检测闸。
+- `docs/upgrades/v0.4.21-plan.md` — JSON 变体的升级 artifact（merge commit `55bf3432f`）。
 - `docs/solutions/workflow-issues/rerere-stale-auto-resolution-upgrade-merge.md` — rerere 在升级合并的行为（与本文的 git merge 内部边界是不同层面：rerere 是缓存层，共同 context 是 diff 算法层）。
 - `docs/upgrades/v0.4.18-plan.md` — 本次升级 Phase 4 的完整 resolve 记录（含此冲突的 python 脚本）。

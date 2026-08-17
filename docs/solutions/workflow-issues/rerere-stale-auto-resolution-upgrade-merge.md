@@ -2,6 +2,7 @@
 title: "rerere auto-resolution can be stale — re-verify any rerere-resolved conflict against upstream's current intent"
 module: selfhost-upgrade
 date: 2026-07-27
+last_updated: 2026-08-17
 problem_type: workflow_issue
 component: development_workflow
 severity: medium
@@ -25,7 +26,7 @@ tags:
 
 ## Context
 
-A long-running self-host fork of Multica tracks the upstream repository and periodically merges upstream release tags. The fork has `rerere` (reuse recorded resolution) enabled, so git remembers how past merge conflicts were resolved and replays those resolutions when it sees the same conflicted hunks again.
+A long-running self-host fork of Multica tracks the upstream repository and periodically merges upstream release tags. The fork has `rerere` (reuse recorded resolution) enabled, so git remembers how past merge conflicts were resolved and replays those resolutions when it sees the same conflicted hunks again. (Where it lives: `[rerere] enabled = true` + `autoupdate = true` in the operator's **global `~/.gitconfig`**, not the repo's `.git/config` — accurate for this host, but a fresh clone on a machine without that setting will not replay resolutions; the `.git/rr-cache/` directory in the repo carries the recorded resolutions.)
 
 During the v0.4.9 → v0.4.11 upgrade (merge commit `185d446d8`, 2026-07-27 — self-host fork only, not on upstream `origin/main`), the merge produced exactly one conflicted file: `docker-compose.selfhost.build.yml`. Git rerere auto-resolved it without surfacing a conflict for review. But the recorded resolution it replayed had been captured during the **prior** v0.4.9 upgrade — and it was stale. It re-added two build args, `REMOTE_API_URL` and `NEXT_PUBLIC_WS_URL`, that upstream had since **removed** in commit `a90aa92d0` (which moved API/WS URL resolution from build-time to runtime). Verified against the new tag: `git show v0.4.11:Dockerfile.web` declares only one ARG, `NEXT_PUBLIC_APP_VERSION`, and sets `ENV REMOTE_API_URL=http://backend:8080` at runtime instead. `Dockerfile.web` no longer declares the two ARGs rerere re-added.
 

@@ -1,7 +1,7 @@
 ---
 title: "Member Display Name Management"
 date: 2026-06-15
-last_updated: 2026-08-04
+last_updated: 2026-08-17
 category: architecture-patterns
 module: workspace/auth/admin
 problem_type: architecture_pattern
@@ -195,6 +195,12 @@ function DesktopAdminRoute() {
 **Invite with a display name via CLI:**
 ```sh
 multica workspace member invite \
+  --email a@b.com --role member --name "Alice" --output json
+```
+
+> **CLI pitfall (2026-08-17).** This command surface was **unrunnable on repo-built fork CLIs** between 2026-07-09 and 2026-08-17: fork commit `215f833df` re-registered the base's `role`/`output` flags in the same `init()`, so pflag panicked at package init (`panic: invite flag redefined: role`) before any command ran. Fix `d5428bc26` deleted the base's `role`+`output` pair — **the fork block now owns these flags outright**; any future upstream merge touching `server/cmd/multica/cmd_workspace.go` must not reintroduce a base registration alongside the fork block. Production was unaffected throughout (the daemon runs the Homebrew CLI, not repo builds). Full write-up: `docs/solutions/runtime-errors/duplicate-pflag-registration-init-panic-invisible-to-static-gates.md`.
+
+```
   --email alice@example.com \
   --role member \
   --name "Alice Chen" \

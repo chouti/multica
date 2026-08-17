@@ -1,6 +1,7 @@
 ---
 title: Resumable upgrade-plan artifact — a typed frontmatter state machine for long, interruptible upstream upgrades
 date: 2026-07-23
+last_updated: 2026-08-17
 category: architecture-patterns
 module: upgrade-workflow
 problem_type: architecture_pattern
@@ -26,7 +27,8 @@ Give the workflow **one typed artifact per run** at `docs/upgrades/<target-tag>-
 upgrade_contract: selfhost-upgrade/v1   # contract version; bump when the shape changes
 target_tag: v0.4.8
 base_tag: v0.4.6
-phase: gates          # single-value state machine: audit → preview → resolve → verify → gates → done
+phase: gates          # single-value state machine: audit → preview → resolve → verify → gates → record → done
+merge_commit: 75ec751af  # recorded at Phase 5 close; the merge commit is created BEFORE Phase 6 (the version re-stamp resolves the tag from HEAD — commit-first)
 gates:                # boolean checklist — preconditions for the irreversible steps
   user_confirmed: true
   audit_strategy_written: true
@@ -58,7 +60,7 @@ A fresh agent that has never seen the prior session can open `docs/upgrades/v0.4
 Any multi-phase workflow that (a) can be interrupted and resumed across sessions, and (b) has an irreversible gate that must only fire after a reversible phase genuinely completes. Upstream upgrades, DB migrations, release cuts. Not worth it for single-shot or fully-reversible tasks.
 
 ## Examples
-- `docs/upgrades/v0.4.6-plan.md` and `docs/upgrades/v0.4.8-plan.md` — canonical instances (frontmatter shape, gate names, phase body). `v0.4.8-plan.md` reached `phase: done` with all gates true after a real upgrade.
+- `docs/upgrades/v0.4.6-plan.md`, `docs/upgrades/v0.4.8-plan.md`, and `docs/upgrades/v0.4.26-plan.md` — canonical instances (frontmatter shape, gate names, phase body). The real state machine has seven values — `record` sits between `gates` and `done` (Phase 7 closes the plan + ledger) — and real artifacts carry a `merge_commit:` key stamped when the merge commit is created at the end of Phase 5, before Phase 6's version re-stamp (which needs the tag reachable from HEAD). `v0.4.26-plan.md` reached `phase: done` with all gates true after the 2026-08-17 upgrade.
 - The `upgrade-upstream` skill writes Phase 1 strategy into the artifact, hard-checks `phase == gates` before the irreversible DB/service steps (Phase 6), and closes the file `phase: done`.
 
 ## Related

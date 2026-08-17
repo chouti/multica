@@ -1,6 +1,7 @@
 ---
 title: "Run database migrations after every upstream upgrade — and watch for migration version reshuffles"
 date: 2026-07-10
+last_updated: 2026-08-17
 category: "workflow-issues"
 module: "database/migrations"
 problem_type: "workflow_issue"
@@ -50,19 +51,19 @@ Upstream renumbered the chat migrations during v0.3.42: the previously-applied `
 ALTER TABLE chat_session ADD COLUMN last_read_at TIMESTAMPTZ NOT NULL DEFAULT now();
 ```
 
-— **without `IF NOT EXISTS`**. Because the local DB had already applied the old `145_chat_read_cursor` (which created `last_read_at`), `migrate up` errored on `151` and aborted the whole run, leaving `150`/`157` (the column adds) unapplied. The migration runner applies each `.up.sql` via one `conn.Exec` and stops at the first error (`server/cmd/migrate/main.go:274`).
+— **without `IF NOT EXISTS`**. Because the local DB had already applied the old `145_chat_read_cursor` (which created `last_read_at`), `migrate up` errored on `151` and aborted the whole run, leaving `150`/`157` (the column adds) unapplied. The migration runner applies each `.up.sql` via one `conn.Exec` and stops at the first error (the `runMigrations` loop in `server/cmd/migrate/main.go`; the mechanism is stable, only the line number drifted).
 
 ## Guidance
 
 ### 1. After every upstream merge, run migrations explicitly
 
-The upgrade workflow in `safe-upstream-upgrade-with-local-customizations.md` verifies `go build` / `typecheck` / `test` / `build` but does **not** run migrations. Add it to the checklist:
+(Historical note, 2026-08-17: at capture time the SOP's verification step omitted migrations; the SOP's Step 7 now runs `migrate up` — this doc is the provenance record for that step.) Run migrations explicitly as part of every upgrade checklist:
 
 ```bash
 cd server && DATABASE_URL="postgres://fengzhao@localhost:5433/multica?sslmode=disable" go run ./cmd/migrate up
 ```
 
-`cmd/migrate` reads `DATABASE_URL` and falls back to `postgres://multica:multica@localhost:5432/multica` (`server/cmd/migrate/main.go:120`). On a self-hosted instance whose DB is on a non-default port/user, **you must export `DATABASE_URL`** or the tool connects to the wrong (or nonexistent) database and "migrations ran fine" masks that nothing happened.
+`cmd/migrate` reads `DATABASE_URL` and falls back to `postgres://multica:multica@localhost:5432/multica` (`server/cmd/migrate/main.go:290`). On a self-hosted instance whose DB is on a non-default port/user, **you must export `DATABASE_URL`** or the tool connects to the wrong (or nonexistent) database and "migrations ran fine" masks that nothing happened.
 
 ### 1a. Predict migration number collisions before merge
 
@@ -192,6 +193,6 @@ comm -13 \
 
 ## Related
 
-- `docs/solutions/workflow-issues/safe-upstream-upgrade-with-local-customizations.md` — the upgrade workflow this gap lives in; its verification step omits running migrations (Guidance §1).
+- `docs/solutions/workflow-issues/safe-upstream-upgrade-with-local-customizations.md` — the upgrade workflow this gap lived in; its Step 7 now runs migrations (this doc is why).
 - `docs/solutions/workflow-issues/pnpm-install-after-upstream-merge.md` — sibling "post-merge step the workflow forgot" lesson: a file-level merge does not run installers, and the same is true of migrations.
 - Merge `2d34a8d0b` (v0.3.42 upgrade); migrations `150_agent_task_coalesced_comments`, `157_agent_task_delivered_comments`; query `ListTasksByIssue` in `server/pkg/db/generated/agent.sql.go`.

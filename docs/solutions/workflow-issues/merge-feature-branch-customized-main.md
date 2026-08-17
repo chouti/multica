@@ -89,10 +89,13 @@ git commit --no-edit
 
 ```bash
 cd server && go build -o ./bin/server ./cmd/server
-pm2 restart multica-backend
+# launchd-supervised (production since 2026-07-22):
+launchctl kickstart gui/$(id -u)/com.fengzhao.multica-backend
+# ad-hoc / dev (no supervisor): kill the port, re-run the bare process
+lsof -ti:8081 | xargs kill -9 && ./server/bin/server &
 ```
 
-> **Self-host note:** on a Homebrew-pg self-host pm2's process table is empty, so `pm2 restart multica-backend` fails. Restart the bare process instead: `lsof -ti:8081 | xargs kill -9` then run `./server/bin/server` (or `set -a; source .env; set +a; go run -C server ./cmd/server`). See `docs/solutions/workflow-issues/self-host-service-start-without-docker.md`.
+> **Self-host note:** `pm2 restart multica-backend` does NOT work here — pm2's process table is empty. The bare-process fallback is `lsof -ti:8081 | xargs kill -9` then run `./server/bin/server` (or `set -a; source .env; set +a; go run -C server ./cmd/server`). See `docs/solutions/workflow-issues/self-host-service-start-without-docker.md`.
 
 ### Step 3: Check migration status
 
@@ -102,6 +105,8 @@ curl -s http://localhost:8081/healthz
 ```
 
 ### Step 4: Apply migration manually
+
+> **Preferred runner (2026-08-17):** use the repo's migration runner instead of hand-applying SQL — `set -a; source .env; set +a; go run -C server ./cmd/migrate up` (reads `DATABASE_URL` from `.env`, records `schema_migrations` itself, outside-transaction so concurrent indexes work). The manual `psql` path below remains valid when you must apply exactly one file by hand.
 
 ```bash
 # Read the migration file

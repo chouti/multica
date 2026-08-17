@@ -1,6 +1,7 @@
 ---
 title: "Upstream API divergence makes cherry-pick a port: adapt before assuming it applies"
 date: 2026-07-10
+last_updated: 2026-08-17
 category: workflow-issues
 module: contributing-upstream
 problem_type: workflow_issue
@@ -86,6 +87,6 @@ git push fork feat/pr && gh pr create
 
 ## Related
 
-- multica-ai/multica#5199 — the PR created by porting the avatar-chip feature onto upstream's refactored ActorAvatar.
+- multica-ai/multica#5199 — the PR created by porting the avatar-chip feature onto upstream's refactored ActorAvatar. (Status: CLOSED 2026-07-31 without merge, per the ledger's 2026-08-14 update — upstream chose another path; the actor-chip stays a fork-own-forever surface, so the porting lesson here remains the reference for any future upstream PR from this fork.)
 - `packages/ui/lib/avatar-size.ts` — the upstream size token definition (`AvatarSize`, `AVATAR_SIZE_PX`).
 - Commit `f4de0948a refactor(ui): unify ActorAvatar size tiers + round all avatars` — the upstream breaking change that forced the port.

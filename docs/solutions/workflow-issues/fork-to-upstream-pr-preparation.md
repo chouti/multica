@@ -1,6 +1,7 @@
 ---
 title: "从 Self-host Fork 准备干净的 Upstream PR"
 date: 2026-07-29
+last_updated: 2026-08-17
 module: "git/development_workflow/fork-upstream-pr"
 problem_type: "workflow_issue"
 component: "development_workflow"
@@ -83,7 +84,9 @@ git log --format='%h %s%n%b' origin/main..HEAD \
 
 ### 3. 把 cherry-pick 当成跨基线移植，而不是机械复制
 
-相同提交在不同基线上可能暴露不同失败。本次 CLI 提交在 fork main 上受测试包既有 init panic 遮蔽；移到已修复该 panic 的 upstream main 后，`TestValidIssueStatuses` 才暴露 expected map 少了 `archived`。正确期望集有 8 项，CLI 接受列表也有 8 项 (`server/cmd/multica/cmd_issue_test.go:2686-2703`；`server/cmd/multica/cmd_issue.go:362-364`，PR `#6106` 分支)。
+相同提交在不同基线上可能暴露不同失败。本次 CLI 提交在 fork main 上受测试包既有 init panic 遮蔽；移到已修复该 panic 的 upstream main 后，`TestValidIssueStatuses` 才暴露 expected map 少了 `archived`。正确期望集有 8 项，CLI 接受列表也有 8 项 (`server/cmd/multica/cmd_issue_test.go:2689-2707`；`server/cmd/multica/cmd_issue.go:373-375`，PR `#6106` 分支)。
+
+**后记（2026-08-17）**：那个"既有 init panic"已根因定位并修复——fork commit `215f833df` 在同一 `init()` 里双注册了 invite flags（pflag package-init panic），修复 commit `d5428bc26`（详见 `docs/solutions/runtime-errors/duplicate-pflag-registration-init-panic-invisible-to-static-gates.md`）。panic 修复后 `TestValidIssueStatuses` 在 fork main 上**实为红色**——8 项期望集只在 PR 分支修过、fork main 从未同步；已由 `e2448b159` 补上 `"archived": true`。本节的"不同基线暴露不同失败"教训因此在 fork 侧有一个已了结的活实例。
 
 因此，每完成一层移植就运行该层最窄测试，不要等所有提交结束：
 
@@ -101,7 +104,7 @@ pnpm --filter @multica/views typecheck
 这是最关键、也最反直觉的规则：
 
 - **fork 本地已执行的迁移不重编号。** 本地 `schema_migrations` 已记录 213/214；改文件名不会改数据库事实，反而会造成迁移重放或历史不一致 (auto memory [claude]: `project_fork_213_214_migration_collision`、`project_migration_duplicate_prefix_no_renumber`)。
-- **尚未合入 upstream 的 PR 迁移必须改用 upstream 当前空白号。** PR `#6106` 准备期间，`#6107` 占用了 234，最终 archived-status 迁移使用 235/236。PR 分支中的文件为 `server/migrations/235_issue_status_archived.{up,down}.sql` 和 `server/migrations/236_issue_status_classifier_functions.{up,down}.sql`；唯一前缀约束由 `TestMigrationNumericPrefixesStayUniqueAfterLegacySet` 检查 (`server/internal/migrations/migrations_lint_test.go:74`)。
+- **尚未合入 upstream 的 PR 迁移必须改用 upstream 当前空白号。** PR `#6106` 准备期间，`#6107` 占用了 234，最终 archived-status 迁移使用 235/236。PR 分支中的文件为 `server/migrations/235_issue_status_archived.{up,down}.sql` 和 `server/migrations/236_issue_status_classifier_functions.{up,down}.sql`；唯一前缀约束由 `TestMigrationNumericPrefixesStayUniqueAfterLegacySet` 检查 (`server/internal/migrations/migrations_lint_test.go:80`)。**前瞻（2026-08-17）**：上游此后已落地自己的 235/236（`235_chat_message_quick_actions`、`236_agent_task_quick_actions_disabled`，自 v0.4.16 起），PR 分支的 235/236 **再次与上游撞号**——`#6106` 下次 rebase 需再次改号（越过上游当前 max 313）。
 
 重命名示例：
 
@@ -144,7 +147,7 @@ PR 开发期间 upstream `#6108`（MUL-5451）重构了 type scale。冲突集�
 2. 丢弃 fork 的 ad-hoc 字号写法；
 3. 使用 upstream role token，例如 `text-micro`、`text-caption`、`text-body`。
 
-这些 token 在冲突文件中实际使用，例如 `board-card.tsx:185-220`、`issue-detail.tsx:694-759`、`issues-page.tsx:61-106`、`list-row.tsx:84-164` (PR `#6106` 分支)；lint 自身提示使用 `text-micro … text-display`，以及 `text-sm -> text-body` (该 lint 规则位于 upstream PR `#6108` 引入的 `apps/web/app/type-scale.test.ts`，文件本身尚未合入本 fork worktree)。
+这些 token 在冲突文件中实际使用，例如 `board-card.tsx:185-220`、`issue-detail.tsx:694-759`、`issues-page.tsx:61-106`、`list-row.tsx:84-164` (PR `#6106` 分支)；lint 自身提示使用 `text-micro … text-display`，以及 `text-sm -> text-body` (该 lint 规则位于 upstream PR `#6108` 引入的 `apps/web/app/type-scale.test.ts`；2026-08-17 refresh：该文件现已随上游 release 并入本 fork worktree，此前"尚未合入"的表述已过期)。
 
 Rebase 后只检查整个仓库容易被既有代码噪声淹没，应该限制到 PR diff：
 
@@ -268,4 +271,4 @@ git log --oneline origin/main..HEAD
 - Upstream PR `#6107`：引入 `234_agent_task_queue_retired_session_id`，触发迁移号避让；该描述 per this session's conclusion。
 - Upstream PR `#6108` / MUL-5451：type-scale 重构；该关联 per this session's conclusion，token 与 lint 规则已由源码验证。
 - Fork ledger：`docs/customizations.md`。
-- 迁移唯一前缀测试：`server/internal/migrations/migrations_lint_test.go:74`。
+- 迁移唯一前缀测试：`server/internal/migrations/migrations_lint_test.go:80`。

@@ -1,6 +1,7 @@
 ---
 title: "Type-scale refactors leave fork-only islands invisible to merge-tree and typecheck — only the guard test catches them"
 date: 2026-07-31
+last_updated: 2026-08-17
 category: workflow-issues
 module: git
 problem_type: workflow_issue
@@ -54,7 +55,7 @@ These five files still carried the old `text-sm`, `text-xs`, `text-[11px]`, `tex
 - **`pnpm typecheck`** passes because TypeScript does not care about class-name strings.
 - **`git diff <base>..v0.4.15`** against these files shows zero changes — they are byte-identical to their pre-merge state.
 
-Only `apps/web/app/type-scale.test.ts` — a source-text grep guard that walks `packages/ui`, `packages/views`, `apps/web`, `apps/desktop/src` (line 45: `const scanRoots = ["packages/ui", "packages/views", "apps/web", "apps/desktop/src"]`) and reports banned patterns (`text-[Npx]`, `text-[Nrem]`, and Tailwind defaults `text-xs`/`text-sm`/`text-base`/`text-lg`/`text-xl`/`text-2xl`/`text-3xl`, lines 65–82) — flagged the violations after the merge. First `pnpm test` run caught 13 files / ~30 off-scale call sites across `issues-page`, `issues-header`, `members-tab`, `import-panel`, `frontmatter-card`, `issue-identifier-badge`, `skill-profile-card`, `skill-agent-picker`, plus the fork-only files listed above. None would have shipped without that test.
+Only `apps/web/app/type-scale.test.ts` — a source-text grep guard that walks `packages/ui`, `packages/views`, `apps/web`, `apps/desktop/src` (line 45: `const scanRoots = ["packages/ui", "packages/views", "apps/web", "apps/desktop/src"]`) and reports banned patterns (`text-[Npx]`, `text-[Nrem]`, and Tailwind defaults `text-xs`/`text-sm`/`text-base`/`text-lg`/`text-xl`/`text-2xl`/`text-3xl`, lines 65–83 — 2026-08-17 refresh: the guard has since grown a 4th banned-pattern class (hand-written CSS literal lengths), marketing-path exemptions, and a note on why 4xl+ defaults are out of scope; the doc's guidance still matches) — flagged the violations after the merge. First `pnpm test` run caught 13 files / ~30 off-scale call sites across `issues-page`, `issues-header`, `members-tab`, `import-panel`, `frontmatter-card`, `issue-identifier-badge`, `skill-profile-card`, `skill-agent-picker`, plus the fork-only files listed above. None would have shipped without that test.
 
 The session-history probe surfaced the same pattern recurring at three different layers in the 7-day window before this merge:
 
@@ -143,7 +144,7 @@ And the existing `negative_claims` entry for MUL-5451 was annotated with the les
 ## Related
 
 - `docs/upgrades/v0.4.15-plan.md` (search "MUL-5451" and "fork-only" for the recorded claim and its correction)
-- `apps/web/app/type-scale.test.ts` (the guard; `scanRoots` line 45, banned patterns lines 65–82)
+- `apps/web/app/type-scale.test.ts` (the guard; `scanRoots` line 45, banned patterns lines 65–83 plus the later additions)
 - `packages/ui/styles/tokens.css:88-110` (the role-named scale definitions the guard enforces)
 - PR #6136 (the upstream MUL-5451 commit; commit SHAs can be rewritten, PR numbers don't)
 - `docs/solutions/workflow-issues/clean-state-rerun-protocol.md` (sibling learning: rerere absorption can mask staleness — same theme of "merge clean ≠ merge correct")

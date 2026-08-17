@@ -1,6 +1,7 @@
 ---
 title: "Run tsc typecheck after every upstream merge — auto-merge silently breaks even files with no local changes"
 date: 2026-07-23
+last_updated: 2026-08-17
 category: workflow-issues
 module: upgrade-workflow
 problem_type: best_practice
@@ -44,6 +45,8 @@ Every upstream merge, regardless of how few conflicts there were. Especially whe
 v0.4.8 upgrade: fixed the two test cases by replicating main's #5778 fix (merged after v0.4.8, so absent from this checkout) — removed the dangling `serverIssues`, inlined `issues={[makeIssue(...)]}` on the `<Harness>` — without pulling in #5778's unrelated toolbar changes. Full record in `docs/upgrades/v0.4.8-plan.md` Phase 5.
 
 ## Related
+
+- `docs/solutions/workflow-issues/auto-merge-semantic-collisions-same-symbol-and-fork-test-signature.md` — the sibling collision-classes doc (2026-08-14): its Class 1 (same-symbol-different-region duplicate) is caught by the same `pnpm typecheck` gate this doc prescribes, as the "duplicate" counterpart to this doc's "dropped declaration" case; also embedded as gate #2 of the upgrade skill's Phase 5.
 - `docs/solutions/workflow-issues/safe-upstream-upgrade-with-local-customizations.md` — the upgrade SOP whose Step 7 runs this typecheck gate
 - `docs/solutions/test-failures/migration-lint-duplicate-prefix-whitelist-gap.md` — same shape: a verification gate catching a bug that quietly slipped through
 - `docs/upgrades/v0.4.8-plan.md` — Phase 5 records this exact fallout

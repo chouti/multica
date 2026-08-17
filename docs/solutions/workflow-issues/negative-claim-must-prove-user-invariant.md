@@ -1,6 +1,7 @@
 ---
 title: "Negative-claim verification must prove the user-visible invariant, not its symbol proxy — two blind-spot failures in one upgrade audit (silent call-site loss + D(b)→D(a) reversal)"
 date: 2026-08-11
+last_updated: 2026-08-17
 category: workflow-issues
 module: upstream-upgrade-merge
 problem_type: workflow_issue
@@ -63,7 +64,7 @@ tags:
 
 前两问的实操落点。把 claim 重写成行为陈述，再选命令：
 
-- "truncateFallbackCommentBody 定义唯一" → 重写为"合成成功评论路径仍在调用 truncateFallbackCommentBody 并把 `task.ID` 作为 source_task_id 透传"。证明命令：`grep -n 'truncateFallbackCommentBody\|createAgentComment' server/internal/service/task.go | grep -A1 truncateFallback`，或干脆 Read `task.go:3560-3566` 肉眼确认调用点。
+- "truncateFallbackCommentBody 定义唯一" → 重写为"合成成功评论路径仍在调用 truncateFallbackCommentBody 并把 `task.ID` 作为 source_task_id 透传"。证明命令：`grep -n 'truncateFallbackCommentBody\|createAgentComment' server/internal/service/task.go | grep -A1 truncateFallback`，或干脆 Read `task.go:3663-3669` 肉眼确认调用点。
 - "use-issue-surface-data.ts 没有 fork 的 load-more hooks" → 重写为"看板仍按 assignee 分组、archived 默认隐藏、分页游标由服务端下发"。证明命令：先 `grep -n 'IssueGroupBranches\|loadMoreGroups\|pagination' packages/views/issues/surface/use-issue-surface-data.ts`（确认 replacement 在场），再打开 `use-issue-group-branches.ts:44-51` 确认它覆盖了 fork 原本覆盖的维度。
 
 注意：第 3 问的命令通常**不止一条**，而且常常需要 Read 一个片段而不是 grep 一个符号。这是预期的——negative claim 的代价就该如此。"一条 grep 敲定"的 claim，往往就是 proxy-blindfold 的高危信号。
@@ -78,13 +79,13 @@ tags:
 
 这个失败模式在**每一层防御里都是静默的**，这是它比 sibling 文档里那些"至少有一层会叫"的失败更危险的地方。
 
-先看 task.go 这一案。3-way auto-merge 在这里交出了完美答卷：fork 改的是定义区（把 `truncateFallbackCommentBody` 挪到 fork-only 的 `server/internal/service/fallback_comment_truncate.go`），upstream 改的是调用区（在 `task.go:3565` 包了一层 `truncateFallbackCommentBody(...)` 调用）。两侧改的是**同一文件的不同区域**，从 3-way merge 的视角每一边都"clean"——于是 auto-merge 老老实实把两边合并进同一棵树。这棵树：
+先看 task.go 这一案。3-way auto-merge 在这里交出了完美答卷：fork 改的是定义区（把 `truncateFallbackCommentBody` 挪到 fork-only 的 `server/internal/service/fallback_comment_truncate.go`），upstream 改的是调用区（在 `task.go:3668` 包了一层 `truncateFallbackCommentBody(...)` 调用）。两侧改的是**同一文件的不同区域**，从 3-way merge 的视角每一边都"clean"——于是 auto-merge 老老实实把两边合并进同一棵树。这棵树：
 
 - **编译通过**（定义还在、调用点引用的符号也存在，Go 不会报"未使用"或"未定义"——因为调用点的符号在 fork-only 文件里定义着，编译器只关心引用可解析，不关心调用点是否真的 invoke 了它）；
 - **测试全绿**（本次 session 的审计记录显示合并后树通过了完整的测试套件——`pnpm test` 326 files / ~3867 tests——但没有任何一条断言"超长 dump 没进 timeline"这种运行时性质，所以 GH #5455 的保护被 disarm 这件事对测试是不可观测的；Go 侧的 `TestTruncateFallbackCommentBody` 只隔离测了截断函数本身，没测调用点是否仍 invoke 它）；
 - **merge 报告 clean**（无 textual conflict）。
 
-三层全绿，但生产里合成成功评论路径会原样把一份 200KB 的执行流 dump 灌进 issue timeline——GH #5455 当初要堵的那个东西，原封不动地回来了。唯一能发现它的是 Phase 4 那个沿调用链 Read 调用点的语义横扫 agent（C4），它读到 `task.go:3565` 发现 wrapping 不在，才把这条 disarm 揪出来。
+三层全绿，但生产里合成成功评论路径会原样把一份 200KB 的执行流 dump 灌进 issue timeline——GH #5455 当初要堵的那个东西，原封不动地回来了。唯一能发现它的是 Phase 4 那个沿调用链 Read 调用点的语义横扫 agent（C4），它读到 `task.go:3668` 发现 wrapping 不在，才把这条 disarm 揪出来。
 
 再看 use-issue-surface-data.ts 这一案。Phase 1 的 negative claim "fork 的 load-more hooks 没了" **本身为真**——hooks 确实没了（当前树里 `grep -rn 'useLoadMoreByStatus\|myIssuesOpts\|myIssuesScope\|myIssuesFilter' packages/views/issues/surface/` 返回空，D(a) 已落地）。但它的**隐含推论** "assignee 分组能力因此丢了"为假——upstream 的 `IssueGroupBranches` + `pagination: Record<string, IssueGroupPageState>` + `loadMoreGroups` 是更强的 server-cursor 替代。如果 Phase 4 没有强制读 replacement，这个隐含推论就会变成一条 ~500 行的 D(b) 手工恢复任务，凭空把一个上游已经用更好方式解决过的问题重新解决一遍，还顺带引入 Phase 5 typecheck 循环引用风险。
 
@@ -141,17 +142,17 @@ negative claim 一旦从 Phase 1 进了账本，后续 Phase 默认不再 re-tou
 grep -n 'truncateFallbackCommentBody' server/internal/service/task.go
 ```
 
-不锚定 `^func`、不 `-c`，打印所有出现位置。本次 session 的 Phase 4 agent 跑的就是这个——`task.go` 里 `truncateFallbackCommentBody` 的唯一一次出现是 `task.go:3565` 那个**调用点**（不是定义），定义在 `fallback_comment_truncate.go:16`。Read 当前树可以原样确认：
+不锚定 `^func`、不 `-c`，打印所有出现位置。本次 session 的 Phase 4 agent 跑的就是这个——`task.go` 里 `truncateFallbackCommentBody` 的唯一一次出现是 `task.go:3668` 那个**调用点**（不是定义），定义在 `fallback_comment_truncate.go:16`。Read 当前树可以原样确认：
 
 ```go
-// server/internal/service/task.go:3565
+// server/internal/service/task.go:3668
 content := truncateFallbackCommentBody(redact.Text(body), maxSynthesizedFallbackCommentRunes)
 s.createAgentComment(ctx, task.IssueID, task.AgentID, content, "comment", task.TriggerCommentID, task.ID)
 ```
 
-调用点 invoke 了 `truncateFallbackCommentBody(redact.Text(body), maxSynthesizedFallbackCommentRunes)`，cap 常量 `maxSynthesizedFallbackCommentRunes = 200` 定义在 `server/internal/service/fallback_comment_truncate.go:9`（rune-based，对 CJK 公平）。GH #5455 的动机写在 `fallback_comment_truncate.go:6` 的注释里；`task.go:3560-3564` 的注释则写出 "View run" attribution 的动机。**这是 fix 已经合并后的当前树状态**——合并 commit `7206599e2`（2026-08-11，reachable from `main`）。
+调用点 invoke 了 `truncateFallbackCommentBody(redact.Text(body), maxSynthesizedFallbackCommentRunes)`，cap 常量 `maxSynthesizedFallbackCommentRunes = 200` 定义在 `server/internal/service/fallback_comment_truncate.go:9`（rune-based，对 CJK 公平）。GH #5455 的动机写在 `fallback_comment_truncate.go:6` 的注释里；`task.go:3663-3667` 的注释则写出 "View run" attribution 的动机。**这是 fix 已经合并后的当前树状态**——合并 commit `7206599e2`（2026-08-11，reachable from `main`）。
 
-Phase 4 之所以能翻盘，是因为 auto-merge 在本次升级中**先**把 `task.go:3565` 的 wrapping 丢了（fork 动过定义区 143-160 + 挪到 fork-only 文件；upstream 动过 caller 区 3565；两侧各自 clean → auto-merge 合出一棵"编译绿、测试绿、保护 disarm"的树）。Phase 1 的 `grep -c '^func'` 对此**不可观测**——它只数 `task.go` 内的 `func` 定义行，对"调用点是否 invoke"这个性质是盲的。
+Phase 4 之所以能翻盘，是因为 auto-merge 在本次升级中**先**把 `task.go:3668` 的 wrapping 丢了（fork 动过定义区 143-160 + 挪到 fork-only 文件；upstream 动过 caller 区 3668；两侧各自 clean → auto-merge 合出一棵"编译绿、测试绿、保护 disarm"的树）。Phase 1 的 `grep -c '^func'` 对此**不可观测**——它只数 `task.go` 内的 `func` 定义行，对"调用点是否 invoke"这个性质是盲的。
 
 **三问映射**：
 - 第 1 问（Proxy vs invariant）：`grep -c '^func'` 是 proxy；invariant 是"合成成功评论路径仍 invoke 截断函数"。
@@ -202,6 +203,6 @@ sed -n '40,55p' packages/views/issues/surface/use-issue-group-branches.ts
 - `docs/solutions/workflow-issues/merge-conflict-checkout-theirs-drops-fork-only-members.md` —— fork-only 成员的 whole-file 覆盖盲区（`git merge-file` 三方合并 + flat(fork)-flat(now) 差集扫描兜底）。和本 doc 的关系：那个是"merge 动作本身"丢了成员，本 doc 是"验证动作"证错了对象。
 - `docs/solutions/workflow-issues/run-typecheck-after-upstream-merge.md` 和 `upstream-type-scale-refactor-fork-only-files-blindspot.md` —— post-merge 验证 gate 家族。`pnpm typecheck` / `go build` / 守卫测试是 necessary-not-sufficient；本 doc 补充的是"工具链绿"之上还有一层"验证命令证对了 invariant 没"的方法论 gate，工具链绿无法替代。其中 type-scale doc 的 Guidance step 5 + When-to-Apply 已经埋下过本 doc 的种子（"every negative_claims verified_by must ENFORCE the invariant, not only inspect it"），本 doc 把它从 design-token 实例推广成适用于任何 negative claim 的方法论。
 - `docs/solutions/workflow-issues/safe-upstream-upgrade-with-local-customizations.md` —— 升级 SOP 总文档。本 doc 的三问自检 + 再查规则应作为其 Phase 1 审计步骤的前置方法论。
-- 自动记忆 `feedback_negative_claim_must_prove_user_invariant`（type=feedback）—— 本 doc 的 SOURCE。memory 里的三问框架（proxy / replacement / translate symbol→behavior）是同一套，本 doc 在其基础上补齐了 memory 缺少的 grounded file:line 引用（`task.go:3565`、`fallback_comment_truncate.go:9,16`、`use-issue-surface-data.ts:22,114,396`、`use-issue-group-branches.ts:44,51`）、merge commit `7206599e2` 的 reachability / 日期上下文，以及 (session history) 跨 5 次升级的复发证据与"三道防线全部查在场不查可达"的结构性分析。
+- 自动记忆 `feedback_negative_claim_must_prove_user_invariant`（type=feedback）—— 本 doc 的 SOURCE。memory 里的三问框架（proxy / replacement / translate symbol→behavior）是同一套，本 doc 在其基础上补齐了 memory 缺少的 grounded file:line 引用（`task.go:3668`、`fallback_comment_truncate.go:9,16`、`use-issue-surface-data.ts:22,114,396`、`use-issue-group-branches.ts:44,51`）、merge commit `7206599e2` 的 reachability / 日期上下文，以及 (session history) 跨 5 次升级的复发证据与"三道防线全部查在场不查可达"的结构性分析。
 - 流程产物：`docs/upgrades/v0.4.22-plan.md`（Phase 记录）、`docs/customizations.md`（"Last upgrade — v0.4.21 → v0.4.22" 账本条目）。两者均为本仓库实际文件（2026-08-11 修改）。合并 commit `7206599e2`（2026-08-11 10:52:27 +0800）为本仓库 merge commit，verified ancestor of HEAD on this checkout。
 - (session history) 跨升级复发证据来自 ce-compound 的 session-history probe 对 `v0.4.15 / v0.4.18 / v0.4.19 / v0.4.21` 四次更早升级会话的回扫（Claude Code sessions, 2026-07-31 至 2026-08-07）。v0.4.15 那次"非阻塞行为分歧"prose 发现是该盲点的最早记录，比 v0.4.22 早 12 天，但因未升格成 claim / memory 而在后续四次审计里逐次降级直至消失。
