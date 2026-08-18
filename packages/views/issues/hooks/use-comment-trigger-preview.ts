@@ -15,6 +15,18 @@ export interface UseCommentTriggerPreviewResult {
   // Explicit @agent / @squad mentions that will NOT trigger if posted as-is
   // (MUL-4525 §2), so the composer can warn before sending.
   blocked: CommentTriggerOutcome[];
+  // The backend rows BEFORE the skill-designated merge below. The skill
+  // auto-bind recommendation must rank these, not `agents`: the merge
+  // replaces a backend row with its designation row (source
+  // `mention_skill`) when an agent is both implicit and designated, which
+  // would erase the backend source the recommendation sorts on (KTD1).
+  backendAgents: CommentTriggerPreviewAgent[];
+  // True once a backend answer is available for the current composer
+  // context (a same-context placeholder during refetch counts). False while
+  // the debounced signature is empty, the request is in flight, or it
+  // failed. "Answered with zero agents" is resolved=true, so consumers can
+  // distinguish "nothing will trigger" from "not yet known".
+  resolved: boolean;
 }
 
 export function isNoteCommentDraft(content: string): boolean {
@@ -123,7 +135,7 @@ export function useCommentTriggerPreview({
   // Loading and errors intentionally surface as "no agents": the preview is
   // an enhancement, and the composer renders nothing for an empty list.
   if (signature === "empty" || debouncedSignature === "empty") {
-    return { agents: [], blocked: [] };
+    return { agents: [], blocked: [], backendAgents: [], resolved: false };
   }
 
   const backendAgents = previewQuery.data?.agents ?? [];
@@ -145,5 +157,7 @@ export function useCommentTriggerPreview({
   return {
     agents: merged,
     blocked: previewQuery.data?.blocked ?? [],
+    backendAgents,
+    resolved: previewQuery.data !== undefined,
   };
 }

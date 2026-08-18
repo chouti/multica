@@ -251,7 +251,12 @@ describe("useCommentTriggerPreview", () => {
 
     await advancePreviewDebounce();
 
-    expect(result.current).toEqual({ agents: [], blocked: [] });
+    expect(result.current).toEqual({
+      agents: [],
+      blocked: [],
+      backendAgents: [],
+      resolved: false,
+    });
     expect(previewCommentTriggers).not.toHaveBeenCalled();
   });
 
@@ -287,8 +292,11 @@ describe("useCommentTriggerPreview", () => {
     });
     // The shared agent appears once (deduped) and surfaces the designation
     // row, so the chip reflects "will run carrying the skill" rather than a
-    // bare implicit trigger (R5).
+    // bare implicit trigger (R5). The unmerged backend rows stay available
+    // for consumers that must rank by the backend source (KTD1).
     expect(result.current.agents[0]).toEqual(designatedAgent);
+    expect(result.current.backendAgents).toEqual([implicitAgent]);
+    expect(result.current.resolved).toBe(true);
   });
 });
 

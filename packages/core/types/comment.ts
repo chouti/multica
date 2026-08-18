@@ -59,7 +59,13 @@ export interface CommentTriggerOutcome {
 export type CommentTriggerSource =
   | "issue_assignee"
   | "mention_agent"
-  | "mention_squad_leader";
+  | "mention_squad_leader"
+  | "thread_parent"
+  | "conversation_continuation"
+  // Frontend-only: the composer tags a skill-designated preview row with this
+  // source. The backend preview never emits it (it discards
+  // skill_mention_agents), but the create-comment contract can.
+  | "mention_skill";
 
 export interface CommentTriggerPreviewAgent {
   id: string;

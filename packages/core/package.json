@@ -36,6 +36,7 @@
     "./issues/mutations": "./issues/mutations.ts",
     "./issues/timeline-sort": "./issues/timeline-sort.ts",
     "./issues/comment-trigger-outcomes": "./issues/comment-trigger-outcomes.ts",
+    "./issues/skill-mention-recommendation": "./issues/skill-mention-recommendation.ts",
     "./issues/date": "./issues/date.ts",
     "./issues/ws-updaters": "./issues/ws-updaters.ts",
     "./issues/surface/*": "./issues/surface/*.ts",
