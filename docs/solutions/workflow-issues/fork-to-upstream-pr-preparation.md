@@ -1,7 +1,7 @@
 ---
 title: "从 Self-host Fork 准备干净的 Upstream PR"
 date: 2026-07-29
-last_updated: 2026-08-17
+last_updated: 2026-08-18
 module: "git/development_workflow/fork-upstream-pr"
 problem_type: "workflow_issue"
 component: "development_workflow"
@@ -104,7 +104,7 @@ pnpm --filter @multica/views typecheck
 这是最关键、也最反直觉的规则：
 
 - **fork 本地已执行的迁移不重编号。** 本地 `schema_migrations` 已记录 213/214；改文件名不会改数据库事实，反而会造成迁移重放或历史不一致 (auto memory [claude]: `project_fork_213_214_migration_collision`、`project_migration_duplicate_prefix_no_renumber`)。
-- **尚未合入 upstream 的 PR 迁移必须改用 upstream 当前空白号。** PR `#6106` 准备期间，`#6107` 占用了 234，最终 archived-status 迁移使用 235/236。PR 分支中的文件为 `server/migrations/235_issue_status_archived.{up,down}.sql` 和 `server/migrations/236_issue_status_classifier_functions.{up,down}.sql`；唯一前缀约束由 `TestMigrationNumericPrefixesStayUniqueAfterLegacySet` 检查 (`server/internal/migrations/migrations_lint_test.go:80`)。**前瞻（2026-08-17）**：上游此后已落地自己的 235/236（`235_chat_message_quick_actions`、`236_agent_task_quick_actions_disabled`，自 v0.4.16 起），PR 分支的 235/236 **再次与上游撞号**——`#6106` 下次 rebase 需再次改号（越过上游当前 max 313）。
+- **尚未合入 upstream 的 PR 迁移必须改用 upstream 当前空白号。** PR `#6106` 准备期间，`#6107` 占用了 234，最终 archived-status 迁移使用 235/236。PR 分支中的文件为 `server/migrations/235_issue_status_archived.{up,down}.sql` 和 `server/migrations/236_issue_status_classifier_functions.{up,down}.sql`；唯一前缀约束由 `TestMigrationNumericPrefixesStayUniqueAfterLegacySet` 检查 (`server/internal/migrations/migrations_lint_test.go:80`)。**前瞻（2026-08-17）**：上游此后已落地自己的 235/236（`235_chat_message_quick_actions`、`236_agent_task_quick_actions_disabled`，自 v0.4.16 起），PR 分支的 235/236 **再次与上游撞号**——`#6106` 下次 rebase 需再次改号（越过上游当前 max 313）。**前瞻更新（2026-08-18，v0.4.28 后）**：改号只是最小的障碍了——上游 max 已到 341，且 v0.4.28 落地了 MUL-6243（PR #7065 MERGED）：per-workspace `issue_status` catalog、7 个 canonical category 行为等价类、`server/internal/issuestatus/` 包、migration 337 **DROP 掉了本 PR 迁移所重建的那条 `issue_status_check` 约束**（改为 format-only）。`#6106` 的下次 rebase 因此必须对 catalog 做**语义和解**，不只是改号：archived 无法 seed 为目录行（category CHECK 禁止第 8 类；cancelled 类继承 counts-as-completed 语义），fork 本地已用 **compose-and-keep** 落地了参考形态——archived 作为 `issuestatus` 包内第 8 个伪内置（`Archived` const + `IsBuiltIn`/`ActiveKeys` 触点，Canonical/seed 保持 7）+ 组合谓词（`issueguard.IsClosedStatus(issuestatus.Effective(...))` / SQL `effective NOT IN (...) AND status <> 'archived'`），见 `fork-archived-status-semantic-collision-compose-into-upstream-issuestatus.md`。PR 若想上游化，需把这套组合表达为上游可接受的形态，而非重放 PR 分支现有的「重建约束 + 硬编码 8 值列表」方案。
 
 重命名示例：
 

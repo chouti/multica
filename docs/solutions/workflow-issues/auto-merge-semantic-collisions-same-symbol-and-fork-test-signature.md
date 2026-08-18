@@ -1,7 +1,7 @@
 ---
 title: "Two auto-merge collision classes merge-tree and file-level audits miss — same-symbol-different-region duplicate (caught by tsc) and fork-only test file vs upstream signature drift (caught by go vet, not go build)"
 date: 2026-08-14
-last_updated: 2026-08-17
+last_updated: 2026-08-18
 category: workflow-issues
 module: upstream-upgrade-merge
 problem_type: workflow_issue
@@ -28,6 +28,8 @@ tags: [upstream-upgrade, auto-merge, three-way-merge, merge-tree-blindspot, type
 (session history) 这两类并非孤立：在 v0.4.18→v0.4.20 升级里，**同一个 fork-only 测试文件** `task_source_task_id_test.go` 就因 `CompleteTask`/`FailTask` 签名漂移被 `go vet` 抓过一次，并被 `negative-claim-must-prove-user-invariant.md` 第 106 行引用为 `go vet` 抓陈旧测试调用点的范例。所以 Class 2 在 v0.4.25 是**复发**，不是首例；Class 1（同符号异区重复）则是首次被形式化记录。本仓库的 collision-family 文档（`negative-claim`、`fork-customization-invariant-set`、`upstream-orthogonal-signature-double-change-blindspot`）已各自覆盖了相邻的盲区，本文补上"编译器/linter 抓、merge-tree 抓不到"这一层。
 
 两类碰撞的共同主线是：**auto-merge 在文件级 / hunk 级重叠上是可靠的，但它看不见"语义级"的重复与签名漂移。** `git merge-tree` 只看文本重叠；文件级人工审计看的是文件和 hunk；两者都无法感知 (a) 同一个导出符号在同一个文件的两个不相交区域被各自添加，或 (b) 一个 fork-only 文件调用了一个被 upstream 改了签名的函数。Phase 5 的全量编译门（`pnpm typecheck` 与 `go vet`）是这两类的可靠兜底（2026-08-17 补：编译门之下还有执行级 rung，见 Guidance 末节）。
+
+**分类学补全（2026-08-18，v0.4.28 升级发现第三类）**：本碰撞家族现有三类——Class 1（同符号异区重复，tsc 抓）、Class 2（fork-only 测试 × upstream 签名漂移，go vet 抓）、**Class 3（fork 数据语义 × upstream 新建系统）**：upstream 在 fork 已有定制的领域落地一套全新子系统（v0.4.28 MUL-6243 per-workspace issue status catalog），fork 的领域语义（archived 的 closed-not-completed）与新系统在**数据语义**上冲突。这一类比前两类低一层：Class 1/2 至少有编译门兜底，Class 3 在 merge-tree、typecheck、go vet、乃至执行级测试**全部隐形**——合并后所有 gate 全绿，测试钉还可能被 auto-merge 成矛盾契约而"不红"。唯一检测手段是 Phase 1 的领域级审计问题（「fork 的成员在新系统的词汇表里叫什么？」）；解法面见 `fork-archived-status-semantic-collision-compose-into-upstream-issuestatus.md`（compose-and-keep 模式）。CONCEPTS.md 的 **Verification Gate Ladder** 词条称之为"阶梯地板之下的类"。
 
 ## Guidance
 
@@ -141,6 +143,7 @@ Phase 1 审计当时确实扫了非测试调用方（`server/internal/handler/da
 
 ## Related
 
+- `docs/solutions/workflow-issues/fork-archived-status-semantic-collision-compose-into-upstream-issuestatus.md` — **Class 3（fork 数据语义 × upstream 新建系统）**：分类学的第三类，全部 gate（含执行级）隐形，只有领域审计可见；其重心是解法面（compose-and-keep），本文的重心是 Class 1/2 的检测面（编译门）。
 - `docs/solutions/workflow-issues/fork-customization-invariant-set-upstream-test-collision.md` — 同 meta 家族（"干净 auto-merge ≠ 语义正确；fork 定制是跨 code+test+locale 的不变量集合"），但那篇的碰撞靠**跑上游行为测试**抓，本文两类靠**编译器/linter（tsc / `go vet`）**抓——这是最清晰的分界，故各自独立成篇而非合并。
 - `docs/solutions/workflow-issues/negative-claim-must-prove-user-invariant.md` — 第 106 行已把 `task_source_task_id_test.go` 当作 v0.4.20 的 `go vet` 抓陈旧调用点范例引用；本文 Class 2 是其**复发 + 形式化**。那篇讲"验证什么（用户可见不变量 vs 符号代理）"，本文讲"用哪道门、什么启发式检测"。
 - `docs/solutions/workflow-issues/upstream-orthogonal-signature-double-change-blindspot.md` — Strategy D scenario A（双侧改同一签名）。其 Guidance 第 68 行已开"跑 `go vet` 抓测试调用点"的处方；本文 Class 2 把它专门化为"upstream 单边改签名 + fork-only 测试文件够不到"的子变体。
