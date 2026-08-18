@@ -52,9 +52,16 @@ func registerSubscriberListeners(bus *events.Bus, pool *pgxpool.Pool) {
 			addSubscriber(bus, queries, e.WorkspaceID, issue.ID, *issue.AssigneeType, *issue.AssigneeID, "assignee")
 		}
 
-		// Subscribe @mentioned users in description
+		// Subscribe @mentioned users in description. Only member/agent
+		// mentions can own a subscriber row — issue_subscriber.user_type is
+		// constrained to ('member','agent'), so skill/squad/issue/project/all
+		// mentions would hit the CHECK constraint (or panic on parseUUID for
+		// the non-UUID "all" id).
 		if issue.Description != nil && *issue.Description != "" {
 			for _, m := range parseMentions(*issue.Description) {
+				if !isAssignmentRecipientType(m.Type) {
+					continue
+				}
 				addSubscriber(bus, queries, e.WorkspaceID, issue.ID, m.Type, m.ID, "mentioned")
 			}
 		}
@@ -97,6 +104,9 @@ func registerSubscriberListeners(bus *events.Bus, pool *pgxpool.Pool) {
 				}
 				for _, m := range newMentions {
 					if !prevMentioned[m.Type+":"+m.ID] {
+						if !isAssignmentRecipientType(m.Type) {
+							continue
+						}
 						addSubscriber(bus, queries, e.WorkspaceID, issue.ID, m.Type, m.ID, "mentioned")
 					}
 				}
