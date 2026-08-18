@@ -25,6 +25,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/issueguard"
+	"github.com/multica-ai/multica/server/internal/issuestatus"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -1669,7 +1670,9 @@ func (h *Handler) mirrorPullRequestForWorkspace(ctx context.Context, wsID pgtype
 		// intent was ever delivered, the user should decide manually.
 		if state == "merged" || state == "closed" {
 			for _, issue := range reevalIssues {
-				if issueguard.IsClosedStatus(issue.Status) {
+				// A custom terminal status counts as terminal here (MUL-6243), and
+				// fork archived is closed-not-completed — also skip re-evaluating it.
+				if s := issuestatus.Effective(ctx, h.Queries, issue.WorkspaceID, issue.Status); issueguard.IsClosedStatus(s) {
 					continue
 				}
 				// Combined across providers: an issue may also carry a still-open

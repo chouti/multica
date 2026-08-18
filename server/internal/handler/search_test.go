@@ -35,9 +35,11 @@ func TestBuildSearchQuery_SingleTerm(t *testing.T) {
 		t.Error("exact title rank should compare LOWER(i.title) = $1 directly")
 	}
 
-	// Should exclude closed issues by default (done, cancelled, archived).
-	if !strings.Contains(query, "NOT issue_status_is_closed(i.status)") {
-		t.Error("query should exclude done/cancelled/archived when includeClosed=false")
+	// Should exclude closed issues by default (done, cancelled, archived), plus
+	// custom statuses whose category resolves to done/cancelled (MUL-6243).
+	if !strings.Contains(query, "issue_effective_status(i.workspace_id, i.status) NOT IN ('done', 'cancelled')") ||
+		!strings.Contains(query, "i.status <> 'archived'") {
+		t.Error("query should exclude done/cancelled/archived (and custom terminal categories) when includeClosed=false")
 	}
 }
 
