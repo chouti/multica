@@ -15,6 +15,7 @@ import { useT } from "../../i18n";
 import { CommentTriggerChips } from "./comment-trigger-chips";
 import { useCommentTriggerPreview } from "../hooks/use-comment-trigger-preview";
 import { useSkillDesignatedPreviewAgents } from "../hooks/use-skill-designated-preview-agents";
+import { useSkillMentionAutoOpen } from "../hooks/use-skill-mention-auto-open";
 import { useCommentUploads } from "./use-comment-uploads";
 import { useQuickActionMenu } from "../hooks/use-quick-action-menu";
 
@@ -84,6 +85,9 @@ function ReplyInput({
   );
   // Composer-owned popover-open state, keyed by skill id (see comment-input).
   const [openPopoverFor, setOpenPopoverFor] = useState<string | null>(null);
+  // U3/KTD4: typed @-menu skill selections auto-open the agent picker (gated
+  // on the workspace agent list), same as the top-level composer.
+  const handleSkillMentionInserted = useSkillMentionAutoOpen(wsId, setOpenPopoverFor);
   // Skill-designated agents surfaced as preview chips (see comment-input).
   const skillDesignatedAgents = useSkillDesignatedPreviewAgents(wsId, skillMentionAgents);
   const triggerPreview = useCommentTriggerPreview({
@@ -310,6 +314,7 @@ function ReplyInput({
               openPopoverFor,
               setOpenPopoverFor,
             }}
+            onSkillMentionInserted={handleSkillMentionInserted}
             quickActionMenu={quickActionMenu}
           />
         </div>

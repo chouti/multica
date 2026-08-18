@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import type { ComponentProps } from "react";
+import type { Editor } from "@tiptap/react";
 import type { MentionView } from "./mention-view";
 import {
   SkillMentionContext,
@@ -75,9 +76,23 @@ vi.mock("@multica/ui/components/ui/popover", () => {
       const trigger = render?.(triggerProps) ?? <span {...triggerProps} />;
       return <span data-testid="popover-trigger">{trigger}{children}</span>;
     },
-    PopoverContent: ({ children }: { children: React.ReactNode }) => {
+    PopoverContent: ({
+      children,
+      initialFocus,
+    }: {
+      children: React.ReactNode;
+      initialFocus?: boolean | unknown;
+    }) => {
       if (!_open) return null;
-      return <div data-testid="popover-content">{children}</div>;
+      return (
+        <div
+          data-testid="popover-content"
+          data-slot="popover-content"
+          data-initial-focus={String(initialFocus)}
+        >
+          {children}
+        </div>
+      );
     },
   };
 });
@@ -451,5 +466,131 @@ describe("MentionView issue mention", () => {
     expect(defaultNotPrevented).toBe(false);
     expect(openInNewTab).toHaveBeenCalledWith(ISSUE_PATH, "MUL-7");
     expect(push).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// U3 / KTD4 — the popover's editor-side keyboard path.
+//
+// Auto-open must not steal focus: the caret stays in the editor, so the
+// popover is driven from there — Tab/ArrowDown move focus into the picker
+// list, Escape or the first typing keystroke dismiss it. jsdom cannot verify
+// Base UI's real focus movement, so focus control is asserted as the explicit
+// initialFocus={false} contract plus the behavior of the key handlers.
+// ---------------------------------------------------------------------------
+
+function renderSkillMentionWithEditor(context: SkillMentionContextValue) {
+  // The editor-side handler reads editor.view.dom to tell "focus still in the
+  // editor" from "focus moved into the list". A real detached div appended to
+  // body lets focus() actually move document.activeElement in jsdom — it
+  // needs tabIndex to be focusable at all, and -1 keeps it out of the Tab
+  // order the way ProseMirror's contenteditable-owning root behaves here.
+  const editorDom = document.createElement("div");
+  editorDom.setAttribute("data-testid", "fake-editor-dom");
+  editorDom.tabIndex = -1;
+  document.body.appendChild(editorDom);
+  const editor = { view: { dom: editorDom } } as unknown as Editor;
+  const props = {
+    node: { attrs: { type: "skill", id: "skill-1", label: "code-review" } },
+    editor,
+  } as unknown as ComponentProps<typeof MentionView>;
+  const view = render(
+    <SkillMentionContext.Provider value={context}>
+      <MentionViewComponent {...props} />
+    </SkillMentionContext.Provider>,
+  );
+  return { ...view, editorDom, cleanup: () => editorDom.remove() };
+}
+
+describe("MentionView — skill popover keyboard path (KTD4)", () => {
+  it("opens the popover without moving focus (initialFocus=false on the popup)", () => {
+    const { cleanup } = renderSkillMentionWithEditor(
+      makeSkillContext({ openPopoverFor: "skill-1" }),
+    );
+
+    expect(screen.getByTestId("popover-content")).toHaveAttribute(
+      "data-initial-focus",
+      "false",
+    );
+    cleanup();
+  });
+
+  it("Escape in the editor closes only the popover and stops the keypress from bubbling", () => {
+    const setOpenPopoverFor = vi.fn();
+    const { editorDom, cleanup } = renderSkillMentionWithEditor(
+      makeSkillContext({ openPopoverFor: "skill-1", setOpenPopoverFor }),
+    );
+    editorDom.focus();
+
+    // The same Escape must not reach a host Dialog and discard the draft —
+    // the MUL-5429 lesson from the suggestion popup.
+    const bubbled: string[] = [];
+    const onBubble = (event: KeyboardEvent) => bubbled.push(event.key);
+    document.addEventListener("keydown", onBubble);
+
+    fireEvent.keyDown(editorDom, { key: "Escape" });
+
+    expect(setOpenPopoverFor).toHaveBeenCalledWith(null);
+    expect(bubbled).toEqual([]);
+    document.removeEventListener("keydown", onBubble);
+    cleanup();
+  });
+
+  it("Tab moves focus from the editor into the picker list", () => {
+    const { editorDom, cleanup } = renderSkillMentionWithEditor(
+      makeSkillContext({ openPopoverFor: "skill-1" }),
+    );
+    editorDom.focus();
+
+    const defaultPrevented = fireEvent.keyDown(editorDom, { key: "Tab" });
+
+    expect(defaultPrevented).toBe(false);
+    expect(document.activeElement).toBe(screen.getByTestId("skill-picker-select-agent"));
+    cleanup();
+  });
+
+  it("the first typing keystroke dismisses the popover without swallowing the key", () => {
+    const setOpenPopoverFor = vi.fn();
+    const { editorDom, cleanup } = renderSkillMentionWithEditor(
+      makeSkillContext({ openPopoverFor: "skill-1", setOpenPopoverFor }),
+    );
+    editorDom.focus();
+
+    const defaultNotPrevented = fireEvent.keyDown(editorDom, { key: "a" });
+
+    expect(setOpenPopoverFor).toHaveBeenCalledWith(null);
+    // The keystroke keeps typing in the editor.
+    expect(defaultNotPrevented).toBe(true);
+    cleanup();
+  });
+
+  it("keystrokes inside the picker list are left to the picker", () => {
+    const setOpenPopoverFor = vi.fn();
+    const { cleanup } = renderSkillMentionWithEditor(
+      makeSkillContext({ openPopoverFor: "skill-1", setOpenPopoverFor }),
+    );
+    const row = screen.getByTestId("skill-picker-select-agent");
+    row.focus();
+
+    fireEvent.keyDown(row, { key: "b" });
+
+    expect(setOpenPopoverFor).not.toHaveBeenCalled();
+    cleanup();
+  });
+
+  it("typing after Escape does not re-open the popover", () => {
+    const setOpenPopoverFor = vi.fn();
+    const { editorDom, cleanup } = renderSkillMentionWithEditor(
+      makeSkillContext({ openPopoverFor: "skill-1", setOpenPopoverFor }),
+    );
+    editorDom.focus();
+
+    fireEvent.keyDown(editorDom, { key: "Escape" });
+    fireEvent.keyDown(editorDom, { key: "x" });
+
+    expect(setOpenPopoverFor).toHaveBeenCalledWith(null);
+    // A re-open would target the skill id again.
+    expect(setOpenPopoverFor).not.toHaveBeenCalledWith("skill-1");
+    cleanup();
   });
 });

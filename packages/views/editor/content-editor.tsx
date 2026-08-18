@@ -168,6 +168,14 @@ interface ContentEditorBaseProps {
     setOpenPopoverFor: (skillId: string | null) => void;
   };
   /**
+   * Fired when the user picks a skill item from the @ suggestion menu — the
+   * typed-selection path only (paste/undo/quick-action never run the
+   * suggestion command). Composers use it to auto-open the skill's agent
+   * picker popover; see `onSkillMentionInsertedRef` in extensions/index.ts
+   * for why it travels through a ref.
+   */
+  onSkillMentionInserted?: (skillId: string) => void;
+  /**
    * Fired whenever this editor's "any attachment still uploading" answer
    * flips. The document IS the upload queue — every path (paste, drop, the
    * upload button, the imperative `uploadFile`) inserts a node with
@@ -397,6 +405,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       attachments,
       flushPendingOnUnmount = false,
       onReady,
+      onSkillMentionInserted,
       skillMentionContext,
     },
     ref,
@@ -413,6 +422,9 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     const onBlurRef = useRef(onBlur);
     const onReadyRef = useRef(onReady);
     const onUploadingChangeRef = useRef(onUploadingChange);
+    // Read through a ref at suggestion-command time — the extension array is
+    // built once at mount, so a directly-captured callback would freeze.
+    const onSkillMentionInsertedRef = useRef(onSkillMentionInserted);
     const onUploadFileRef = useRef<
       ((file: File, uploadId: string) => Promise<UploadResult | null>) | undefined
     >(undefined);
@@ -527,6 +539,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     mentionContextItemsRef.current = mentionContextItems ?? [];
     quickActionMenuRef.current = quickActionMenu;
     flushPendingOnUnmountRef.current = flushPendingOnUnmount;
+    onSkillMentionInsertedRef.current = onSkillMentionInserted;
 
     const queryClient = useQueryClient();
 
@@ -636,6 +649,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
             quickActionMenuRef.current?.onRenderError?.(error),
         },
         resolveIssueIdentifierRef,
+        onSkillMentionInsertedRef,
       }),
       onUpdate: ({ editor: ed }) => {
         if (!onUpdateRef.current) return;

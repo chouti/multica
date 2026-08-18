@@ -18,7 +18,7 @@
  *   still the source of truth.
  */
 
-import { useMemo } from "react";
+import { useMemo, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Circle } from "lucide-react";
 import type { Agent } from "@multica/core/types";
@@ -79,6 +79,24 @@ export function SkillAgentPicker({
     );
   };
 
+  // U3/R4 — the keyboard-only path through the list: the popover can open
+  // without stealing focus (KTD4), Tab hands focus to the first row, and
+  // ArrowUp/ArrowDown then walk the rows (wrapping). Enter activates the
+  // focused row via the button's native key behavior.
+  const listRef = useRef<HTMLDivElement>(null);
+  const handleListKeyDown = (event: React.KeyboardEvent) => {
+    if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+    const rows = Array.from(
+      listRef.current?.querySelectorAll<HTMLButtonElement>("button") ?? [],
+    );
+    if (rows.length === 0) return;
+    event.preventDefault();
+    const current = rows.indexOf(document.activeElement as HTMLButtonElement);
+    const delta = event.key === "ArrowDown" ? 1 : -1;
+    const next = rows[(current + delta + rows.length) % rows.length]!;
+    next.focus();
+  };
+
   const title = skillDetail?.name ?? fallbackSkillName ?? skillId;
   const emptyText = isLoading
     ? t(($) => $.mention.searching)
@@ -95,7 +113,7 @@ export function SkillAgentPicker({
       {visibleAgents.length === 0 ? (
         <div className="px-1 py-2 text-caption text-muted-foreground">{emptyText}</div>
       ) : (
-        <div className="flex flex-col">
+        <div className="flex flex-col" ref={listRef} onKeyDown={handleListKeyDown}>
           {visibleAgents.map((agent: Agent) => {
             const selected = selectedSet.has(agent.id);
             return (

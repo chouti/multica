@@ -13,6 +13,7 @@ import { useT } from "../../i18n";
 import { CommentTriggerChips } from "./comment-trigger-chips";
 import { useCommentTriggerPreview } from "../hooks/use-comment-trigger-preview";
 import { useSkillDesignatedPreviewAgents } from "../hooks/use-skill-designated-preview-agents";
+import { useSkillMentionAutoOpen } from "../hooks/use-skill-mention-auto-open";
 import { useCommentUploads } from "./use-comment-uploads";
 import { useQuickActionMenu } from "../hooks/use-quick-action-menu";
 import { useStickyComposer } from "../hooks/use-sticky-composer";
@@ -63,6 +64,9 @@ function CommentInput({ issueId, onSubmit, editorComponent: EditorComponent = Co
   // the per-NodeView useState so a Tiptap NodeView recreation does not
   // close the picker mid-selection (review finding #14).
   const [openPopoverFor, setOpenPopoverFor] = useState<string | null>(null);
+  // U3/KTD4: a typed @-menu skill selection auto-opens the agent picker,
+  // gated on the workspace agent list having settled non-empty.
+  const handleSkillMentionInserted = useSkillMentionAutoOpen(wsId, setOpenPopoverFor);
   // Skill-designated agents surfaced as preview chips from the local
   // skillMentionAgents map (the backend's preview discards the field
   // for safety — it never binds or triggers on the read-only path).
@@ -298,6 +302,7 @@ function CommentInput({ issueId, onSubmit, editorComponent: EditorComponent = Co
             openPopoverFor,
             setOpenPopoverFor,
           }}
+          onSkillMentionInserted={handleSkillMentionInserted}
           quickActionMenu={quickActionMenu}
         />
       </div>

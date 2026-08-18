@@ -56,6 +56,32 @@ vi.mock("@multica/core/auth", () => ({
   useAuthStore: { getState: () => authState },
 }));
 
+// U3/KTD3: the suggestion plugin view hands MentionList a WRAPPED command.
+// ReactRenderer is stubbed (no real React root) so the props it was given —
+// including that wrapped command — can be asserted directly. The stub only
+// matters for the render-command test below; every other case never mounts
+// the plugin view.
+const lastRendererProps = vi.hoisted(() => ({
+  value: undefined as { command: (item: MentionItem) => void } | undefined,
+}));
+vi.mock("@tiptap/react", () => ({
+  ReactRenderer: class {
+    // suggestion-popup appends this to its popup wrapper; a detached div
+    // keeps the plugin view lifecycle running without a real React root.
+    element = document.createElement("div");
+    constructor(
+      _component: unknown,
+      options: { props: { command: (item: MentionItem) => void } },
+    ) {
+      lastRendererProps.value = options.props;
+    }
+    updateProps(props: { command: (item: MentionItem) => void }) {
+      lastRendererProps.value = props;
+    }
+    destroy() {}
+  },
+}));
+
 vi.mock("../../common/actor-avatar", () => ({
   ActorAvatar: ({ actorId }: { actorId: string }) => (
     <span data-testid={`actor-${actorId}`} />
@@ -168,6 +194,46 @@ describe("createMentionSuggestion", () => {
     searchIssuesMock.mockReset();
     searchProjectsMock.mockReset();
     Element.prototype.scrollIntoView = vi.fn();
+    lastRendererProps.value = undefined;
+  });
+
+  // U3/KTD3: the command handed to MentionList must run Tiptap's default
+  // command verbatim and additionally notify onSkillMentionInserted — but
+  // only for skill items. Paste/undo/quick-action never execute this
+  // command, so the notification marks the typed-selection path alone.
+  it("wraps the suggestion command: default command verbatim, skill picks notify", () => {
+    const qc = fakeQc({});
+    const onSkillMentionInserted = vi.fn();
+    const config = createMentionSuggestion(qc, { onSkillMentionInserted });
+
+    const view = (config.render as () => {
+      onStart: (props: unknown) => void;
+      onExit: () => void;
+    })();
+    const baseCommand = vi.fn();
+    const fakeDom = document.createElement("div");
+    view.onStart({
+      query: "",
+      editor: { view: { dom: fakeDom } } as never,
+      command: baseCommand,
+      clientRect: null,
+    } as never);
+
+    const handedCommand = lastRendererProps.value!.command;
+
+    const skillItem: MentionItem = { id: "s1", label: "deploy", type: "skill" };
+    handedCommand(skillItem);
+    expect(baseCommand).toHaveBeenCalledWith(skillItem);
+    expect(onSkillMentionInserted).toHaveBeenCalledWith("s1");
+
+    onSkillMentionInserted.mockClear();
+    const memberItem: MentionItem = { id: "u1", label: "Alice", type: "member" };
+    handedCommand(memberItem);
+    expect(baseCommand).toHaveBeenCalledWith(memberItem);
+    expect(onSkillMentionInserted).not.toHaveBeenCalled();
+
+    view.onExit();
+    fakeDom.remove();
   });
 
   it("keeps the mention query active across spaces for multi-word search", () => {
