@@ -1,7 +1,7 @@
 ---
 title: "Run tsc typecheck after every upstream merge — auto-merge silently breaks even files with no local changes"
 date: 2026-07-23
-last_updated: 2026-08-17
+last_updated: 2026-08-19
 category: workflow-issues
 module: upgrade-workflow
 problem_type: best_practice
@@ -49,4 +49,5 @@ v0.4.8 upgrade: fixed the two test cases by replicating main's #5778 fix (merged
 - `docs/solutions/workflow-issues/auto-merge-semantic-collisions-same-symbol-and-fork-test-signature.md` — the sibling collision-classes doc (2026-08-14): its Class 1 (same-symbol-different-region duplicate) is caught by the same `pnpm typecheck` gate this doc prescribes, as the "duplicate" counterpart to this doc's "dropped declaration" case; also embedded as gate #2 of the upgrade skill's Phase 5.
 - `docs/solutions/workflow-issues/safe-upstream-upgrade-with-local-customizations.md` — the upgrade SOP whose Step 7 runs this typecheck gate
 - `docs/solutions/test-failures/migration-lint-duplicate-prefix-whitelist-gap.md` — same shape: a verification gate catching a bug that quietly slipped through
+- `docs/solutions/test-failures/whole-module-vi-mock-shadows-new-named-export.md` — the opposite-direction gap this gate does NOT cover: a `vi.mock` partial factory shadowing a newly added named export is a runtime TypeError that `tsc --noEmit` passes clean — caught only by running the full vitest suite. The execution-direction complement to this doc's compile-direction gate; together they cover both ways "typecheck" and "test execution" see different things.
 - `docs/upgrades/v0.4.8-plan.md` — Phase 5 records this exact fallout
