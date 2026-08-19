@@ -32,8 +32,11 @@ export interface UseRecommendedSkillAgentParams {
 }
 
 /**
- * The recommended agent id for the skill-mention popover in the current
- * composer context, or `null` when no candidate qualifies.
+ * The recommended agent for the skill-mention popover in the current composer
+ * context: `id` is the agent id or `null` when no candidate qualifies, and
+ * `from` names the source tier so the consumer can apply the U4/KTD5
+ * temporary-value semantics — a fast-path fill may be replaced by the async
+ * answer exactly once, an async value is immediately sticky.
  *
  * Async path (authoritative): the backend trigger preview runs the same
  * read-only routing the submit will perform, so the recommendation is its
@@ -51,6 +54,11 @@ export interface UseRecommendedSkillAgentParams {
  * the fast-path value on the next render, and nothing is latched here. The
  * temporary-value / sticky semantics live in the consumer (KTD5).
  */
+export interface SkillAgentRecommendation {
+  id: string | null;
+  from: "fast-path" | "async";
+}
+
 export function useRecommendedSkillAgent({
   wsId,
   issueId,
@@ -59,7 +67,7 @@ export function useRecommendedSkillAgent({
   content,
   suppressedAgentIds,
   replyParentAgentId,
-}: UseRecommendedSkillAgentParams): string | null {
+}: UseRecommendedSkillAgentParams): SkillAgentRecommendation {
   const preview = useCommentTriggerPreview({
     issueId,
     parentId,
@@ -102,14 +110,20 @@ export function useRecommendedSkillAgent({
   // Backend answer wins once available — including "answered with zero
   // candidates", which yields null instead of falling back to the fast path.
   if (preview.resolved) {
-    return recommendSkillMentionAgent(preview.backendAgents, eligibleAgentIds, suppressed);
+    return {
+      id: recommendSkillMentionAgent(preview.backendAgents, eligibleAgentIds, suppressed),
+      from: "async",
+    };
   }
 
-  return firstEligibleCandidate(
-    [parentCandidate, assigneeAgentId],
-    eligibleAgentIds,
-    suppressed,
-  );
+  return {
+    id: firstEligibleCandidate(
+      [parentCandidate, assigneeAgentId],
+      eligibleAgentIds,
+      suppressed,
+    ),
+    from: "fast-path",
+  };
 }
 
 function firstEligibleCandidate(

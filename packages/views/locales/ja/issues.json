@@ -456,6 +456,8 @@
       "unresolve_failed": "スレッドの解決を取り消せませんでした"
     },
     "trigger_source_mention_skill": "skillメンション",
+    "skill_autobind_applied_live": "おすすめのエージェントをスキルメンションに割り当てました",
+    "skill_picker_auto_opened_live": "スキルのエージェント選択パネルが開きました。Tabキーでエージェントを選択するか、入力を続けると閉じます",
     "trigger_source_thread_parent": "返信"
   },
   "reply": {

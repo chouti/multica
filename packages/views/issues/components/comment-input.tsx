@@ -13,7 +13,7 @@ import { useT } from "../../i18n";
 import { CommentTriggerChips } from "./comment-trigger-chips";
 import { useCommentTriggerPreview } from "../hooks/use-comment-trigger-preview";
 import { useSkillDesignatedPreviewAgents } from "../hooks/use-skill-designated-preview-agents";
-import { useSkillMentionAutoOpen } from "../hooks/use-skill-mention-auto-open";
+import { useSkillAutoBind } from "../hooks/use-skill-auto-bind";
 import { useCommentUploads } from "./use-comment-uploads";
 import { useQuickActionMenu } from "../hooks/use-quick-action-menu";
 import { useStickyComposer } from "../hooks/use-sticky-composer";
@@ -64,9 +64,32 @@ function CommentInput({ issueId, onSubmit, editorComponent: EditorComponent = Co
   // the per-NodeView useState so a Tiptap NodeView recreation does not
   // close the picker mid-selection (review finding #14).
   const [openPopoverFor, setOpenPopoverFor] = useState<string | null>(null);
-  // U3/KTD4: a typed @-menu skill selection auto-opens the agent picker,
-  // gated on the workspace agent list having settled non-empty.
-  const handleSkillMentionInserted = useSkillMentionAutoOpen(wsId, setOpenPopoverFor);
+  // U4/KTD5: the auto-bind engine — recommendation fill, touched/inserted
+  // guards, suppress interplay, and the submit terminal fill. The U3
+  // auto-open gate and its aria-live announcement live inside.
+  const autoBind = useSkillAutoBind({
+    wsId,
+    issueId,
+    content,
+    suppressedAgentIds,
+    skillMentionAgents,
+    setSkillMentionAgents,
+    editorRef,
+    setOpenPopoverFor,
+    initialTouchedSkillIds: initialDraftPayload?.touchedSkillIds,
+    initialFilledSkillIds: initialDraftPayload?.filledSkillIds,
+  });
+  // Stable slices for effect/callback deps — the `autoBind` object itself is
+  // rebuilt every render, so whole-object deps would re-run effects per tick.
+  const {
+    handleSkillMentionChange,
+    handleSkillMentionInserted,
+    syncSkillMentionsWithDoc,
+    clearAutoFilledDesignationsForAgent: clearAutoFilledDesignations,
+    finalizeSkillMentionAgents,
+    touchedSkillIds: autoTouchedSkillIds,
+    filledSkillIds: autoFilledSkillIds,
+  } = autoBind;
   // Skill-designated agents surfaced as preview chips from the local
   // skillMentionAgents map (the backend's preview discards the field
   // for safety — it never binds or triggers on the read-only path).
@@ -115,9 +138,15 @@ function CommentInput({ issueId, onSubmit, editorComponent: EditorComponent = Co
     const flush = () => {
       const md = editorRef.current?.getMarkdown();
       if (md && md.trim().length > 0) {
-        // Persist content + the skill-mention designation map together so
-        // a restored draft rehydrates both (review finding #7).
-        setDraftPayload(draftKey, { content: md, skillMentionAgents });
+        // Persist content + the skill-mention designation map + the U4
+        // auto-bind guards together so a restored draft rehydrates all of
+        // them (review finding #7, KTD5).
+        setDraftPayload(draftKey, {
+          content: md,
+          skillMentionAgents,
+          touchedSkillIds: autoTouchedSkillIds.size > 0 ? [...autoTouchedSkillIds] : undefined,
+          filledSkillIds: autoFilledSkillIds.size > 0 ? [...autoFilledSkillIds] : undefined,
+        });
       }
     };
     const onVis = () => { if (document.visibilityState === "hidden") flush(); };
@@ -127,12 +156,20 @@ function CommentInput({ issueId, onSubmit, editorComponent: EditorComponent = Co
       document.removeEventListener("visibilitychange", onVis);
       window.removeEventListener("pagehide", flush);
     };
-  }, [draftKey, setDraftPayload, skillMentionAgents]);
+  }, [draftKey, setDraftPayload, skillMentionAgents, autoTouchedSkillIds, autoFilledSkillIds]);
 
+  // issueId scope change: reset the composer's per-issue state. Mount is
+  // skipped on purpose so a hydrated draft (content + designations + U4
+  // guards) survives the virtualization remount the hydration exists for.
+  const prevIssueIdRef = useRef(issueId);
+  const resetAutoBind = autoBind.reset;
   useEffect(() => {
+    if (prevIssueIdRef.current === issueId) return;
+    prevIssueIdRef.current = issueId;
     setSuppressedAgentIds(new Set());
     setSkillMentionAgents({});
-  }, [issueId]);
+    resetAutoBind();
+  }, [issueId, resetAutoBind]);
 
   useEffect(() => {
     const visible = new Set(triggerPreview.agents.map((agent) => agent.id));
@@ -143,32 +180,19 @@ function CommentInput({ issueId, onSubmit, editorComponent: EditorComponent = Co
   }, [triggerPreview.agents]);
 
   const toggleSuppressedAgent = useCallback((agentId: string) => {
+    // Suppressing an agent also clears machine-written skill designations
+    // that name it (U4/KTD5): the explicit "don't run" gesture wins over the
+    // auto-filled default. Touched entries survive; the fill-once marks stay
+    // so nothing silently re-fills.
+    const suppressing = !suppressedAgentIds.has(agentId);
     setSuppressedAgentIds((prev) => {
       const next = new Set(prev);
       if (next.has(agentId)) next.delete(agentId);
       else next.add(agentId);
       return next;
     });
-  }, []);
-
-  const handleSkillMentionChange = useCallback((skillId: string, agentIds: string[]) => {
-    setSkillMentionAgents((prev) => {
-      const next = { ...prev };
-      if (agentIds.length > 0) next[skillId] = agentIds;
-      else delete next[skillId];
-      return next;
-    });
-  }, []);
-
-  // Text-gesture consistency: when a skill mention disappears from the editor
-  // document, drop its designation state too.
-  const syncSkillMentionsWithDoc = useCallback(() => {
-    const ids = new Set(editorRef.current?.getSkillMentionIds() ?? []);
-    setSkillMentionAgents((prev) => {
-      const next = Object.fromEntries(Object.entries(prev).filter(([id]) => ids.has(id)));
-      return Object.keys(next).length === Object.keys(prev).length ? prev : next;
-    });
-  }, []);
+    if (suppressing) clearAutoFilledDesignations(agentId);
+  }, [suppressedAgentIds, clearAutoFilledDesignations]);
 
   // Await-then-render send (MUL-5181): the shared hook reads the markdown,
   // guards empty/in-flight, re-checks the upload gate, locks + spins via
@@ -215,11 +239,12 @@ function CommentInput({ issueId, onSubmit, editorComponent: EditorComponent = Co
       const suppressAgentIds = triggerPreview.agents
         .filter((agent) => suppressedAgentIds.has(agent.id))
         .map((agent) => agent.id);
-      // U3: forward the composer-held designation map (skill id -> agent ids).
-      // Entries are pruned as skill chips disappear from the document, so the
-      // map is already in sync with what the user sees.
-      const skillMentionAgentsPayload =
-        Object.keys(skillMentionAgents).length > 0 ? skillMentionAgents : undefined;
+      // U4: the composer-held designation map (skill id -> agent ids), with
+      // the submit terminal fill applied for typed-inserted chips whose fill
+      // effect had not committed yet. Entries are pruned as skill chips
+      // disappear from the document, so the map is already in sync with what
+      // the user sees.
+      const skillMentionAgentsPayload = finalizeSkillMentionAgents();
       return onSubmit(
         content,
         activeIds.length > 0 ? activeIds : undefined,
@@ -245,6 +270,7 @@ function CommentInput({ issueId, onSubmit, editorComponent: EditorComponent = Co
       setIsEmpty(true);
       setSuppressedAgentIds(new Set());
       setSkillMentionAgents({});
+      resetAutoBind();
       editorScrubbedRef.current = true;
     },
   });
@@ -281,10 +307,16 @@ function CommentInput({ issueId, onSubmit, editorComponent: EditorComponent = Co
             setIsEmpty(!md.trim());
             // Debounced upstream (debounceMs=100). Persist on every tick so a
             // reload or scroll-out-of-viewport restores work to the keystroke.
-            // setDraftPayload carries the skill-mention designations alongside
-            // the text (review #7) and preserves pending attachments; an empty
-            // body with no uploads/designations drops the entry via writeDraft.
-            setDraftPayload(draftKey, { content: md, skillMentionAgents });
+            // setDraftPayload carries the skill-mention designations and the
+            // U4 guards alongside the text (review #7, KTD5) and preserves
+            // pending attachments; an empty body with no
+            // uploads/designations drops the entry via writeDraft.
+            setDraftPayload(draftKey, {
+              content: md,
+              skillMentionAgents,
+              touchedSkillIds: autoTouchedSkillIds.size > 0 ? [...autoTouchedSkillIds] : undefined,
+              filledSkillIds: autoFilledSkillIds.size > 0 ? [...autoFilledSkillIds] : undefined,
+            });
             syncSkillMentionsWithDoc();
           }}
           onSubmit={submit}
@@ -364,6 +396,12 @@ function CommentInput({ issueId, onSubmit, editorComponent: EditorComponent = Co
         />
       </div>
       {isDragOver && <FileDropOverlay />}
+      {/* U4/KTD5: polite announcement for auto-bind events (chip badge flip,
+          picker auto-open) — the popover opens without stealing focus, so
+          screen readers need the live region to learn either happened. */}
+      <span role="status" aria-live="polite" className="sr-only">
+        {autoBind.liveAnnouncement}
+      </span>
     </div>
   );
 }

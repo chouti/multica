@@ -114,7 +114,7 @@ describe("useRecommendedSkillAgent", () => {
     const { result } = renderRecommended({ parentId: "parent-1" });
 
     await vi.waitFor(() => {
-      expect(result.current).toBe(parentAgentId);
+      expect(result.current).toEqual({ id: parentAgentId, from: "fast-path" });
     });
   });
 
@@ -129,7 +129,7 @@ describe("useRecommendedSkillAgent", () => {
     const { result } = renderRecommended({ parentId: "parent-1" });
 
     await vi.waitFor(() => {
-      expect(result.current).toBe(parentAgentId);
+      expect(result.current).toEqual({ id: parentAgentId, from: "fast-path" });
     });
 
     await act(async () => {
@@ -146,7 +146,7 @@ describe("useRecommendedSkillAgent", () => {
     });
 
     await vi.waitFor(() => {
-      expect(result.current).toBe(mentionedAgentId);
+      expect(result.current).toEqual({ id: mentionedAgentId, from: "async" });
     });
   });
 
@@ -155,9 +155,10 @@ describe("useRecommendedSkillAgent", () => {
 
     const { result } = renderRecommended({ parentId: "parent-1" });
 
-    // Fast-path value shows first, then the resolved-empty answer wins.
+    // Fast-path value shows first, then the resolved-empty answer wins —
+    // and an answered-with-zero is authoritative ("async"), not a fallback.
     await vi.waitFor(() => {
-      expect(result.current).toBeNull();
+      expect(result.current).toEqual({ id: null, from: "async" });
     });
   });
 
@@ -173,7 +174,7 @@ describe("useRecommendedSkillAgent", () => {
     const { result } = renderRecommended({ parentId: "parent-1" });
 
     await vi.waitFor(() => {
-      expect(result.current).toBe(assigneeAgentId);
+      expect(result.current).toEqual({ id: assigneeAgentId, from: "fast-path" });
     });
   });
 
@@ -186,7 +187,7 @@ describe("useRecommendedSkillAgent", () => {
     const { result } = renderRecommended({ parentId: "parent-1" });
 
     await vi.waitFor(() => {
-      expect(result.current).toBeNull();
+      expect(result.current.id).toBeNull();
     });
   });
 
@@ -199,7 +200,7 @@ describe("useRecommendedSkillAgent", () => {
     });
 
     await vi.waitFor(() => {
-      expect(result.current).toBeNull();
+      expect(result.current.id).toBeNull();
     });
   });
 
@@ -209,7 +210,7 @@ describe("useRecommendedSkillAgent", () => {
     const { result } = renderRecommended();
 
     await act(async () => {});
-    expect(result.current).toBeNull();
+    expect(result.current.id).toBeNull();
   });
 
   it("ranks only eligible backend rows once the preview resolves", async () => {
@@ -225,7 +226,7 @@ describe("useRecommendedSkillAgent", () => {
     await vi.waitFor(() => {
       // The top-tier mention row fails the visibility check (archived), so
       // the recommendation-side check skips it for the visible assignee.
-      expect(result.current).toBe(assigneeAgentId);
+      expect(result.current).toEqual({ id: assigneeAgentId, from: "async" });
     });
   });
 
@@ -235,6 +236,6 @@ describe("useRecommendedSkillAgent", () => {
     const { result } = renderRecommended({ content: "" });
 
     await act(async () => {});
-    expect(result.current).toBeNull();
+    expect(result.current.id).toBeNull();
   });
 });

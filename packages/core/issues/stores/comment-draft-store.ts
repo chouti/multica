@@ -46,6 +46,17 @@ interface CommentDraft {
    * chip-by-chip designations — review finding #7.
    */
   skillMentionAgents?: Record<string, string[]>;
+  /**
+   * U4/KTD5 auto-bind guards, persisted alongside the designation map so a
+   * virtualization remount cannot re-fill a skill the user explicitly
+   * designated or cleared:
+   * - `touchedSkillIds`: skills the user toggled in the picker (the machine
+   *   default never overrides an explicit gesture);
+   * - `filledSkillIds`: skills already auto-filled once for the current
+   *   chip presence (fill-once invariant).
+   */
+  touchedSkillIds?: string[];
+  filledSkillIds?: string[];
   /** Uploads (placeholders + completed) for this composer session. */
   attachments: DraftUpload[];
   updatedAt: number;
@@ -54,6 +65,10 @@ interface CommentDraft {
 export interface CommentDraftPayload {
   content: string;
   skillMentionAgents?: Record<string, string[]>;
+  /** U4 auto-bind guards — see CommentDraft.touchedSkillIds. */
+  touchedSkillIds?: string[];
+  /** U4 auto-bind guards — see CommentDraft.filledSkillIds. */
+  filledSkillIds?: string[];
 }
 
 interface CommentDraftStore {
@@ -166,9 +181,22 @@ function writeDraft(
       // Without this, every keystroke (setDraft) rebuilds the entry without
       // them and silently drops the user's @skill agent picks (review #7).
       ...(existing?.skillMentionAgents ? { skillMentionAgents: existing.skillMentionAgents } : {}),
+      // Same preservation for the U4 auto-bind guards (KTD5): text/upload
+      // writes must not forget which skills were touched or filled.
+      ...(existing?.touchedSkillIds ? { touchedSkillIds: existing.touchedSkillIds } : {}),
+      ...(existing?.filledSkillIds ? { filledSkillIds: existing.filledSkillIds } : {}),
       updatedAt: Date.now(),
     },
   };
+}
+
+// Order-sensitive value equality for the U4 guard id lists. The composers
+// derive them from Sets, so within a session the order is deterministic; a
+// mismatch across hydration orders at worst rebuilds the entry once.
+function sameIdList(a: string[] | undefined, b: string[] | undefined): boolean {
+  if (a === b) return true;
+  if (!a || !b || a.length !== b.length) return false;
+  return a.every((value, index) => value === b[index]);
 }
 
 function uploadsOf(drafts: Record<string, CommentDraft>, key: string): DraftUpload[] {
@@ -201,6 +229,8 @@ export const useCommentDraftStore = create<CommentDraftStore>()(
         return {
           content: d.content,
           skillMentionAgents: d.skillMentionAgents,
+          touchedSkillIds: d.touchedSkillIds,
+          filledSkillIds: d.filledSkillIds,
         };
       },
       getAttachments: (key) => deriveUploaded(uploadsOf(get().drafts, key)),
@@ -217,36 +247,51 @@ export const useCommentDraftStore = create<CommentDraftStore>()(
           const entry = drafts[key];
           const hasDesignations =
             !!payload.skillMentionAgents && Object.keys(payload.skillMentionAgents).length > 0;
-          // Designations unchanged (same reference, e.g. a pure-content keystroke
-          // that re-passed the component state through) — nothing to reconcile.
-          if (hasDesignations && entry?.skillMentionAgents === payload.skillMentionAgents) {
+
+          // U4 guards: normalize empty arrays away so the persisted schema
+          // stays clean; value-compare so a keystroke whose guards are
+          // unchanged does not rebuild the entry (identity stability for the
+          // composer's stale-submit guard — same rationale as designations).
+          const touched = payload.touchedSkillIds?.length ? payload.touchedSkillIds : undefined;
+          const filled = payload.filledSkillIds?.length ? payload.filledSkillIds : undefined;
+          const guardsChanged =
+            !sameIdList(entry?.touchedSkillIds, touched) ||
+            !sameIdList(entry?.filledSkillIds, filled);
+
+          // Designations unchanged (same reference, e.g. a pure-content
+          // keystroke that re-passed the component state through) — nothing
+          // to reconcile.
+          if (hasDesignations && entry?.skillMentionAgents === payload.skillMentionAgents && !guardsChanged) {
             return { drafts };
           }
-          if (hasDesignations) {
-            // writeDraft drops entries with neither text nor uploads; when only
-            // designations are present, materialize the entry so they persist.
-            const base = entry ?? {
-              content: payload.content,
-              attachments: uploadsOf(s.drafts, key),
-            };
-            return {
-              drafts: {
-                ...drafts,
-                [key]: { ...base, skillMentionAgents: payload.skillMentionAgents!, updatedAt: Date.now() },
-              },
-            };
+          if (!hasDesignations && !entry?.skillMentionAgents && !guardsChanged) {
+            return { drafts };
           }
-          // Designations cleared — drop the field so the persisted schema stays
-          // clean for the no-designation common case (parity with writeDraft).
-          if (entry?.skillMentionAgents) {
-            return {
-              drafts: {
-                ...drafts,
-                [key]: { content: entry.content, attachments: entry.attachments, updatedAt: entry.updatedAt },
-              },
-            };
+          // writeDraft drops entries with neither text nor uploads. Guards
+          // alone are not recoverable intent (no chips left to protect), so a
+          // dropped entry stays dropped; designations alone still materialize
+          // the entry so they persist.
+          if (!entry && !hasDesignations) {
+            return { drafts };
           }
-          return { drafts };
+          const base = entry ?? {
+            content: payload.content,
+            attachments: uploadsOf(s.drafts, key),
+          };
+          const next: CommentDraft = {
+            ...base,
+            ...(hasDesignations ? { skillMentionAgents: payload.skillMentionAgents! } : {}),
+            ...(touched ? { touchedSkillIds: touched } : {}),
+            ...(filled ? { filledSkillIds: filled } : {}),
+            updatedAt: Date.now(),
+          };
+          // Designations/guards cleared — drop the fields so the persisted
+          // schema stays clean for the no-designation common case (parity
+          // with writeDraft).
+          if (!hasDesignations) delete next.skillMentionAgents;
+          if (!touched) delete next.touchedSkillIds;
+          if (!filled) delete next.filledSkillIds;
+          return { drafts: { ...drafts, [key]: next } };
         }),
       appendToDraftContent: (key, markdown) =>
         set((s) => {

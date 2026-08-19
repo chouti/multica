@@ -412,3 +412,100 @@ describe("comment draft store — skillMentionAgents round-trip", () => {
     expect(getDraftPayload("new:nonexistent")).toBeUndefined();
   });
 });
+
+// U4/KTD5 — the auto-bind guards (touched/filled skill ids) ride the same
+// draft entry as the designation map so a virtualization remount cannot
+// re-fill a skill the user explicitly designated or cleared.
+describe("comment draft store — U4 auto-bind guards round-trip", () => {
+  beforeEach(async () => {
+    useCommentDraftStore.setState({ drafts: {} });
+    await flush();
+  });
+
+  it("round-trips touchedSkillIds/filledSkillIds through getDraftPayload", () => {
+    const { setDraftPayload, getDraftPayload } = useCommentDraftStore.getState();
+
+    setDraftPayload("new:issue-1", {
+      content: "hello",
+      touchedSkillIds: ["skill-1", "skill-2"],
+      filledSkillIds: ["skill-3"],
+    });
+
+    const payload = getDraftPayload("new:issue-1")!;
+    expect(payload.touchedSkillIds).toEqual(["skill-1", "skill-2"]);
+    expect(payload.filledSkillIds).toEqual(["skill-3"]);
+  });
+
+  it("drops the guard fields when the next write carries empty arrays", () => {
+    const { setDraftPayload, getDraftPayload } = useCommentDraftStore.getState();
+
+    setDraftPayload("new:issue-1", {
+      content: "hello",
+      touchedSkillIds: ["skill-1"],
+      filledSkillIds: ["skill-1"],
+    });
+    setDraftPayload("new:issue-1", {
+      content: "more",
+      touchedSkillIds: [],
+      filledSkillIds: [],
+    });
+
+    const payload = getDraftPayload("new:issue-1")!;
+    expect(payload.touchedSkillIds).toBeUndefined();
+    expect(payload.filledSkillIds).toBeUndefined();
+  });
+
+  it("does not materialize a guards-only entry when writeDraft dropped the draft", () => {
+    const { setDraftPayload, getDraftPayload } = useCommentDraftStore.getState();
+
+    // Empty content, no uploads: writeDraft drops the entry, and the guards
+    // alone (no chips left to protect) must not resurrect it.
+    setDraftPayload("new:issue-1", { content: "", touchedSkillIds: ["skill-1"] });
+
+    expect(getDraftPayload("new:issue-1")).toBeUndefined();
+  });
+
+  it("preserves guards across setDraft (the upload/text write path)", () => {
+    const { setDraftPayload, setDraft, getDraftPayload } = useCommentDraftStore.getState();
+
+    setDraftPayload("new:issue-1", {
+      content: "hello",
+      touchedSkillIds: ["skill-1"],
+      filledSkillIds: ["skill-2"],
+    });
+    setDraft("new:issue-1", "edited");
+
+    const payload = getDraftPayload("new:issue-1")!;
+    expect(payload.content).toBe("edited");
+    expect(payload.touchedSkillIds).toEqual(["skill-1"]);
+    expect(payload.filledSkillIds).toEqual(["skill-2"]);
+  });
+
+  it("does not rebuild the entry when the guard arrays are value-identical (stale-submit identity)", () => {
+    const { setDraftPayload, getDraftPayload } = useCommentDraftStore.getState();
+
+    // Same reference, as the composer state is across keystrokes.
+    const skillMentionAgents = { "skill-1": ["agent-1"] };
+    setDraftPayload("new:issue-1", {
+      content: "hello",
+      skillMentionAgents,
+      touchedSkillIds: ["skill-1"],
+      filledSkillIds: ["skill-1"],
+    });
+    const before = useCommentDraftStore.getState().drafts["new:issue-1"];
+
+    // Fresh array identities carrying the same values — the entry must not
+    // be rebuilt (a rebuild would read as "edited during the request" to the
+    // composer's stale-submit guard).
+    setDraftPayload("new:issue-1", {
+      content: "hello",
+      skillMentionAgents,
+      touchedSkillIds: ["skill-1"],
+      filledSkillIds: ["skill-1"],
+    });
+    const after = useCommentDraftStore.getState().drafts["new:issue-1"];
+
+    expect(after).toBe(before);
+    expect(getDraftPayload("new:issue-1")!.touchedSkillIds).toEqual(["skill-1"]);
+  });
+});

@@ -448,6 +448,8 @@
     "trigger_source_mention_agent": "@mention",
     "trigger_source_mention_squad_leader": "squad",
     "trigger_source_mention_skill": "skill mention",
+    "skill_autobind_applied_live": "Recommended agent assigned to the skill mention",
+    "skill_picker_auto_opened_live": "Agent picker opened for the skill mention. Press Tab to choose an agent, or keep typing to dismiss",
     "trigger_source_thread_parent": "reply",
     "trigger_source_unknown": "trigger",
     "trigger_skipped_label": "Skipped",

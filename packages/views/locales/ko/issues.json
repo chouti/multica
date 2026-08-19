@@ -456,6 +456,8 @@
       "unresolve_failed": "스레드 해결을 취소하지 못했습니다"
     },
     "trigger_source_mention_skill": "skill 멘션",
+    "skill_autobind_applied_live": "추천 에이전트가 skill 멘션에 할당되었습니다",
+    "skill_picker_auto_opened_live": "skill 멘션의 에이전트 선택 창이 열렸습니다. Tab 키로 에이전트를 선택하거나 계속 입력하면 닫힙니다",
     "trigger_source_thread_parent": "답글"
   },
   "reply": {
