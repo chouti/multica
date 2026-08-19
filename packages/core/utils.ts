@@ -62,3 +62,19 @@ export function isImeComposing(event: {
   const e = event.nativeEvent ?? event;
   return Boolean(e.isComposing) || e.keyCode === 229;
 }
+
+/**
+ * Order-sensitive equality for two optional string lists. Callers derive the
+ * lists from Sets within a session (deterministic order); undefined on either
+ * side only equals undefined on the other. Shared by the comment-draft guard
+ * reconcile and the skill auto-bind doc snapshot so no-change updates can keep
+ * the previous reference.
+ */
+export function sameStringList(
+  a: readonly string[] | undefined,
+  b: readonly string[] | undefined,
+): boolean {
+  if (a === b) return true;
+  if (!a || !b || a.length !== b.length) return false;
+  return a.every((value, index) => value === b[index]);
+}

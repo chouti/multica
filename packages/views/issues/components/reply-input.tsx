@@ -15,6 +15,7 @@ import { useT } from "../../i18n";
 import { CommentTriggerChips } from "./comment-trigger-chips";
 import { useCommentTriggerPreview } from "../hooks/use-comment-trigger-preview";
 import { useSkillDesignatedPreviewAgents } from "../hooks/use-skill-designated-preview-agents";
+import { useSkillAutoBind } from "../hooks/use-skill-auto-bind";
 import { useCommentUploads } from "./use-comment-uploads";
 import { useQuickActionMenu } from "../hooks/use-quick-action-menu";
 
@@ -92,6 +93,35 @@ function ReplyInput({
     content,
     skillDesignatedAgents,
   });
+  // U4/KTD5: the auto-bind engine (recommendation fill, guards, suppress
+  // interplay, submit terminal fill) with the U3 auto-open gate inside —
+  // same as the top-level composer, plus the thread-parent fast path. The
+  // preview result is injected (not re-instantiated) — see comment-input.
+  const autoBind = useSkillAutoBind({
+    wsId,
+    issueId,
+    parentId,
+    triggerPreview,
+    suppressedAgentIds,
+    skillMentionAgents,
+    setSkillMentionAgents,
+    editorRef,
+    setOpenPopoverFor,
+    initialTouchedSkillIds: initialDraftPayload?.touchedSkillIds,
+    initialFilledSkillIds: initialDraftPayload?.filledSkillIds,
+  });
+  // Stable slices for effect/callback deps — the `autoBind` object itself is
+  // rebuilt every render (see comment-input).
+  const {
+    handleSkillMentionChange,
+    handleSkillMentionInserted,
+    syncSkillMentionsWithDoc,
+    clearAutoFilledDesignationsForAgent: clearAutoFilledDesignations,
+    finalizeSkillMentionAgents,
+    reset: resetAutoBind,
+    touchedSkillIds: autoTouchedSkillIds,
+    filledSkillIds: autoFilledSkillIds,
+  } = autoBind;
   // Uploads for this reply session (MUL-5181) — owned by the coordinator. With
   // a draftKey they persist in the draft store so scroll-out/close no longer
   // drops an in-flight upload; without one (no persistence context) they fall
@@ -116,15 +146,28 @@ function ReplyInput({
     onDrop: lazy.uploadOrQueue,
   });
 
+  // One payload builder for both persistence sites (flush + editor onChange)
+  // — see CommentInput. Only built when a draftKey exists (keyless replies
+  // persist nothing).
+  const persistDraft = useCallback(
+    (md: string) => {
+      if (!draftKey) return;
+      setDraftPayload(draftKey, {
+        content: md,
+        skillMentionAgents,
+        touchedSkillIds: autoTouchedSkillIds.size > 0 ? [...autoTouchedSkillIds] : undefined,
+        filledSkillIds: autoFilledSkillIds.size > 0 ? [...autoFilledSkillIds] : undefined,
+      });
+    },
+    [draftKey, setDraftPayload, skillMentionAgents, autoTouchedSkillIds, autoFilledSkillIds],
+  );
   // Flush on tab close / mobile background — same rationale as CommentInput.
   useEffect(() => {
     if (!draftKey) return;
     const flush = () => {
       const md = editorRef.current?.getMarkdown();
       if (md && md.trim().length > 0) {
-        // Persist content + skill-mention designations together so a
-        // restored draft rehydrates both (review finding #7).
-        setDraftPayload(draftKey, { content: md, skillMentionAgents });
+        persistDraft(md);
       }
     };
     const onVis = () => { if (document.visibilityState === "hidden") flush(); };
@@ -134,12 +177,20 @@ function ReplyInput({
       document.removeEventListener("visibilitychange", onVis);
       window.removeEventListener("pagehide", flush);
     };
-  }, [draftKey, setDraftPayload, skillMentionAgents]);
+  }, [draftKey, persistDraft]);
 
+  // Issue/parent scope change: reset per-thread state. Mount is skipped on
+  // purpose so a hydrated draft (content + designations + U4 guards) survives
+  // the virtualization remount the draftKey persistence exists for.
+  const prevScopeRef = useRef(`${issueId}:${parentId}`);
   useEffect(() => {
+    const scope = `${issueId}:${parentId}`;
+    if (prevScopeRef.current === scope) return;
+    prevScopeRef.current = scope;
     setSuppressedAgentIds(new Set());
     setSkillMentionAgents({});
-  }, [issueId, parentId]);
+    resetAutoBind();
+  }, [issueId, parentId, resetAutoBind]);
 
   useEffect(() => {
     const visible = new Set(triggerPreview.agents.map((agent) => agent.id));
@@ -150,32 +201,17 @@ function ReplyInput({
   }, [triggerPreview.agents]);
 
   const toggleSuppressedAgent = useCallback((agentId: string) => {
+    // Suppressing also clears machine-written skill designations naming the
+    // agent (U4/KTD5) — see CommentInput.
+    const suppressing = !suppressedAgentIds.has(agentId);
     setSuppressedAgentIds((prev) => {
       const next = new Set(prev);
       if (next.has(agentId)) next.delete(agentId);
       else next.add(agentId);
       return next;
     });
-  }, []);
-
-  const handleSkillMentionChange = useCallback((skillId: string, agentIds: string[]) => {
-    setSkillMentionAgents((prev) => {
-      const next = { ...prev };
-      if (agentIds.length > 0) next[skillId] = agentIds;
-      else delete next[skillId];
-      return next;
-    });
-  }, []);
-
-  // Text-gesture consistency: when a skill mention disappears from the editor
-  // document, drop its designation state too.
-  const syncSkillMentionsWithDoc = useCallback(() => {
-    const ids = new Set(editorRef.current?.getSkillMentionIds() ?? []);
-    setSkillMentionAgents((prev) => {
-      const next = Object.fromEntries(Object.entries(prev).filter(([id]) => ids.has(id)));
-      return Object.keys(next).length === Object.keys(prev).length ? prev : next;
-    });
-  }, []);
+    if (suppressing) clearAutoFilledDesignations(agentId);
+  }, [suppressedAgentIds, clearAutoFilledDesignations]);
 
   // Await-then-render send (see CommentInput): the shared hook keeps the text,
   // locks + spins, and clears only once the server accepts it.
@@ -219,9 +255,9 @@ function ReplyInput({
       const suppressAgentIds = triggerPreview.agents
         .filter((agent) => suppressedAgentIds.has(agent.id))
         .map((agent) => agent.id);
-      // U3: forward the composer-held designation map (skill id -> agent ids).
-      const skillMentionAgentsPayload =
-        Object.keys(skillMentionAgents).length > 0 ? skillMentionAgents : undefined;
+      // U4: the designation map with the submit terminal fill applied (see
+      // CommentInput).
+      const skillMentionAgentsPayload = finalizeSkillMentionAgents();
       return onSubmit(
         content,
         activeIds.length > 0 ? activeIds : undefined,
@@ -248,6 +284,7 @@ function ReplyInput({
       setIsEmpty(true);
       setSuppressedAgentIds(new Set());
       setSkillMentionAgents({});
+      resetAutoBind();
       editorScrubbedRef.current = true;
     },
   });
@@ -288,11 +325,12 @@ function ReplyInput({
             onUpdate={(md) => {
               setContent(md);
               setIsEmpty(!md.trim());
-              // Debounced upstream (debounceMs=100). setDraftPayload carries
-              // the skill-mention designations alongside the text (review #7)
-              // and preserves pending attachments; an empty body with no
+              // Debounced upstream (debounceMs=100). persistDraft (no-op
+              // without a draftKey) carries the skill-mention designations
+              // and the U4 guards alongside the text (review #7, KTD5) and
+              // preserves pending attachments; an empty body with no
               // uploads/designations drops the entry via writeDraft.
-              if (draftKey) setDraftPayload(draftKey, { content: md, skillMentionAgents });
+              persistDraft(md);
               syncSkillMentionsWithDoc();
             }}
             onSubmit={submit}
@@ -310,6 +348,7 @@ function ReplyInput({
               openPopoverFor,
               setOpenPopoverFor,
             }}
+            onSkillMentionInserted={handleSkillMentionInserted}
             quickActionMenu={quickActionMenu}
           />
         </div>
@@ -367,6 +406,11 @@ function ReplyInput({
           />
         </div>
         {isDragOver && <FileDropOverlay />}
+        {/* U4/KTD5: polite announcement for auto-bind events — see
+            CommentInput. */}
+        <span role="status" aria-live="polite" className="sr-only">
+          {autoBind.liveAnnouncement}
+        </span>
       </div>
     </div>
   );

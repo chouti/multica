@@ -1,7 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"log/slog"
+	"strings"
 	"testing"
 
 	"github.com/multica-ai/multica/server/internal/events"
@@ -413,4 +416,115 @@ func TestParseUUIDConsistency(t *testing.T) {
 		}
 	}()
 	_ = parseUUID("")
+}
+
+// TestSubscriberIssueCreated_SkipsNonActorMentions pins the guard that prevents
+// skill/squad/issue/project/all mentions in an issue description from reaching
+// the issue_subscriber CHECK constraint (user_type IN ('member','agent')).
+// Before the fix, every such mention produced a "failed to add issue subscriber"
+// slog error in backend.err.log — noise that masked real failures.
+func TestSubscriberIssueCreated_SkipsNonActorMentions(t *testing.T) {
+	queries := db.New(testPool)
+	bus := events.New()
+	registerSubscriberListeners(bus, testPool)
+
+	issueID := createTestIssue(t, testWorkspaceID, testUserID)
+	t.Cleanup(func() { cleanupTestIssue(t, issueID) })
+
+	memberEmail := "subscriber-mentioned-member@multica.ai"
+	memberID := createTestUser(t, memberEmail)
+	t.Cleanup(func() { cleanupTestUser(t, memberEmail) })
+
+	desc := "cc [@M](mention://member/" + memberID + ") " +
+		"[@S](mention://skill/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa) " +
+		"[@Sq](mention://squad/bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb) " +
+		"[I](mention://issue/cccccccc-cccc-cccc-cccc-cccccccccccc) " +
+		"[P](mention://project/dddddddd-dddd-dddd-dddd-dddddddddddd) " +
+		"[@all](mention://all/all)"
+
+	var logBuf bytes.Buffer
+	orig := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logBuf, nil)))
+	defer slog.SetDefault(orig)
+
+	bus.Publish(events.Event{
+		Type:        protocol.EventIssueCreated,
+		WorkspaceID: testWorkspaceID,
+		ActorType:   "member",
+		ActorID:     testUserID,
+		Payload: map[string]any{
+			"issue": handler.IssueResponse{
+				ID:          issueID,
+				WorkspaceID: testWorkspaceID,
+				Title:       "test issue",
+				Status:      "todo",
+				Priority:    "medium",
+				CreatorType: "member",
+				CreatorID:   testUserID,
+				Description: &desc,
+			},
+		},
+	})
+
+	// The member mention must still be subscribed.
+	if !isSubscribed(t, queries, issueID, "member", memberID) {
+		t.Fatal("expected mentioned member to be subscribed")
+	}
+
+	// No non-actor mention should have produced a CHECK-constraint error.
+	if strings.Contains(logBuf.String(), "failed to add issue subscriber") {
+		t.Fatalf("non-actor mention triggered CHECK constraint error:\n%s", logBuf.String())
+	}
+}
+
+// TestSubscriberIssueUpdated_SkipsNonActorMentions covers the same guard on the
+// issue:updated path (description_changed=true).
+func TestSubscriberIssueUpdated_SkipsNonActorMentions(t *testing.T) {
+	queries := db.New(testPool)
+	bus := events.New()
+	registerSubscriberListeners(bus, testPool)
+
+	issueID := createTestIssue(t, testWorkspaceID, testUserID)
+	t.Cleanup(func() { cleanupTestIssue(t, issueID) })
+
+	memberEmail := "subscriber-updated-member@multica.ai"
+	memberID := createTestUser(t, memberEmail)
+	t.Cleanup(func() { cleanupTestUser(t, memberEmail) })
+
+	prevDesc := "no mentions here"
+	newDesc := "cc [@M](mention://member/" + memberID + ") " +
+		"[@S](mention://skill/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa)"
+
+	var logBuf bytes.Buffer
+	orig := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logBuf, nil)))
+	defer slog.SetDefault(orig)
+
+	bus.Publish(events.Event{
+		Type:        protocol.EventIssueUpdated,
+		WorkspaceID: testWorkspaceID,
+		ActorType:   "member",
+		ActorID:     testUserID,
+		Payload: map[string]any{
+			"issue": handler.IssueResponse{
+				ID:          issueID,
+				WorkspaceID: testWorkspaceID,
+				Title:       "test issue",
+				Status:      "todo",
+				Priority:    "medium",
+				CreatorType: "member",
+				CreatorID:   testUserID,
+				Description: &newDesc,
+			},
+			"description_changed": true,
+			"prev_description":    &prevDesc,
+		},
+	})
+
+	if !isSubscribed(t, queries, issueID, "member", memberID) {
+		t.Fatal("expected newly mentioned member to be subscribed")
+	}
+	if strings.Contains(logBuf.String(), "failed to add issue subscriber") {
+		t.Fatalf("non-actor mention triggered CHECK constraint error:\n%s", logBuf.String())
+	}
 }

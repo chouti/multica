@@ -109,7 +109,7 @@ interface CommentCardProps {
    * `CommentRow` has to rerun the rule per row.
    */
   canModerate?: boolean;
-  onReply: (parentId: string, content: string, attachmentIds?: string[], suppressAgentIds?: string[]) => Promise<boolean>;
+  onReply: (parentId: string, content: string, attachmentIds?: string[], suppressAgentIds?: string[], skillMentionAgents?: Record<string, string[]>) => Promise<boolean>;
   onEdit: (commentId: string, content: string, attachmentIds: string[], suppressAgentIds?: string[]) => Promise<void>;
   onDelete: (commentId: string) => void;
   onToggleReaction: (commentId: string, emoji: string) => void;
@@ -1213,7 +1213,7 @@ function CommentCardImpl({
                   avatarType="member"
                   avatarId={currentUserId ?? ""}
                   draftKey={`reply:${issueId}:${entry.id}`}
-                  onSubmit={(content, attachmentIds, suppressAgentIds) => onReply(entry.id, content, attachmentIds, suppressAgentIds)}
+                  onSubmit={(content, attachmentIds, suppressAgentIds, skillMentionAgents) => onReply(entry.id, content, attachmentIds, suppressAgentIds, skillMentionAgents)}
                 />
               </div>
             </>

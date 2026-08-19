@@ -189,6 +189,13 @@ export interface EditorExtensionsOptions {
    * context; the setup layer owns React Query + workspace access.
    */
   resolveIssueIdentifierRef?: RefObject<IssueIdentifierResolver | undefined>;
+  /**
+   * Fired when the user picks a skill item from the @ suggestion menu (typed
+   * selection only — paste/undo/quick-action never run the suggestion
+   * command). A ref so the live composer callback is read at event time
+   * without recreating the editor (same reason as onSubmitRef).
+   */
+  onSkillMentionInsertedRef?: RefObject<((skillId: string) => void) | undefined>;
 }
 
 export function createEditorExtensions(
@@ -265,7 +272,15 @@ export function createEditorExtensions(
       ...(options.disableMentions
         ? { suggestion: { allow: () => false } }
         : options.queryClient
-          ? { suggestion: createMentionSuggestion(options.queryClient, { mode: options.mentionMode, getContextItems: options.getMentionContextItems }) }
+          ? { suggestion: createMentionSuggestion(options.queryClient, {
+              mode: options.mentionMode,
+              getContextItems: options.getMentionContextItems,
+              // Read through the ref at event time — the extension array is
+              // built once at mount, so a directly-captured callback would
+              // freeze at whatever closure existed then.
+              onSkillMentionInserted: (skillId) =>
+                options.onSkillMentionInsertedRef?.current?.(skillId),
+            }) }
           : {}),
     }),
     // Linear-style bare identifier → issue mention. Attached only when a

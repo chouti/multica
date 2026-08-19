@@ -165,3 +165,70 @@ describe("SkillAgentPicker", () => {
     expect(screen.queryByText("label-fallback")).not.toBeInTheDocument();
   });
 });
+
+// U3 / R4 — keyboard-only path inside the list. With the popover auto-opened
+// without stealing focus (KTD4), the keyboard route is: Tab enters the list,
+// ArrowUp/ArrowDown move between rows, Enter activates the focused row. The
+// editor-side Tab/Escape entry points live in mention-view.test.tsx; the
+// composer auto-open gate lives in comment-input.test.tsx.
+describe("SkillAgentPicker — keyboard navigation (U3/R4)", () => {
+  it("moves focus through the agent rows with ArrowDown/ArrowUp and wraps", async () => {
+    renderPicker({
+      agents: [
+        agentFixture({ id: "agent-1", name: "Alpha" }),
+        agentFixture({ id: "agent-2", name: "Beta" }),
+        agentFixture({ id: "agent-3", name: "Gamma" }),
+      ],
+    });
+    const rows = await screen.findAllByRole("button");
+    expect(rows).toHaveLength(3);
+
+    rows[0]!.focus();
+    fireEvent.keyDown(rows[0]!, { key: "ArrowDown" });
+    expect(document.activeElement).toBe(rows[1]);
+
+    fireEvent.keyDown(rows[1]!, { key: "ArrowDown" });
+    expect(document.activeElement).toBe(rows[2]);
+
+    // Wraps back to the first row.
+    fireEvent.keyDown(rows[2]!, { key: "ArrowDown" });
+    expect(document.activeElement).toBe(rows[0]);
+
+    fireEvent.keyDown(rows[0]!, { key: "ArrowUp" });
+    expect(document.activeElement).toBe(rows[2]);
+  });
+
+  it("activating the focused row submits that agent as the user's pick", async () => {
+    const onChange = vi.fn();
+    renderPicker({
+      agents: [
+        agentFixture({ id: "agent-1", name: "Alpha" }),
+        agentFixture({ id: "agent-2", name: "Beta" }),
+      ],
+      selectedAgentIds: ["agent-1"],
+      onChange,
+    });
+    const rows = await screen.findAllByRole("button");
+
+    // ArrowDown lands the user's focus on the second row; Enter (a native
+    // button click) toggles THAT agent — the payload is the user's pick.
+    rows[0]!.focus();
+    fireEvent.keyDown(rows[0]!, { key: "ArrowDown" });
+    fireEvent.click(document.activeElement as HTMLElement);
+
+    await waitFor(() => expect(onChange).toHaveBeenCalledWith(["agent-1", "agent-2"]));
+  });
+
+  it("other keys pass through untouched", async () => {
+    renderPicker({
+      agents: [agentFixture({ id: "agent-1", name: "Alpha" })],
+    });
+    const rows = await screen.findAllByRole("button");
+
+    rows[0]!.focus();
+    const defaultNotPrevented = fireEvent.keyDown(rows[0]!, { key: "b" });
+
+    expect(defaultNotPrevented).toBe(true);
+    expect(document.activeElement).toBe(rows[0]);
+  });
+});

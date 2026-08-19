@@ -456,6 +456,8 @@
       "unresolve_failed": "重新打开失败"
     },
     "trigger_source_mention_skill": "skill 提及",
+    "skill_autobind_applied_live": "已为 skill 提及分配推荐的智能体",
+    "skill_picker_auto_opened_live": "已打开 skill 提及的智能体选择面板。按 Tab 选择智能体，或继续输入以关闭",
     "trigger_source_thread_parent": "回复"
   },
   "reply": {

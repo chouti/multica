@@ -740,6 +740,14 @@ function matchesMentionQuery(item: MentionItem, query: string): boolean {
 interface MentionSuggestionOptions {
   mode?: "default" | "context";
   getContextItems?: () => MentionItem[];
+  /**
+   * Fired when the user picks a `skill` item from the @ suggestion menu —
+   * i.e. only on the typed-selection path where Tiptap's suggestion command
+   * inserts the mention node. Pasted skill markup, undo/redo, and quick-action
+   * inserts never run the suggestion command, so they never fire this.
+   * Composers use it to auto-open the skill's agent picker (U3/R1).
+   */
+  onSkillMentionInserted?: (skillId: string) => void;
 }
 
 export function createMentionSuggestion(
@@ -896,7 +904,18 @@ export function createMentionSuggestion(
       getProps: (props) => ({
         items: props.items,
         query: props.query,
-        command: props.command,
+        // U3/KTD3: wrap the command AT THE CALL SITE — the prop handed to
+        // MentionList — so the default Tiptap command still runs verbatim
+        // (range replacement, space normalization). Overriding the
+        // SuggestionOptions-level `command` instead would drop those details.
+        // Because paste/undo/quick-action never execute this command, only a
+        // typed @-menu selection notifies the composer.
+        command: (item) => {
+          props.command(item);
+          if (item.type === "skill") {
+            options.onSkillMentionInserted?.(item.id);
+          }
+        },
         includeProjectSearch: options.mode === "context",
       }),
       onKeyDown: (ref, props) => ref?.onKeyDown(props) ?? false,

@@ -46,7 +46,12 @@ vi.mock("../../common/actor-avatar", () => ({
 
 // The trigger-preview chips have their own suite; inert here so this file
 // stays about the edit gate.
-vi.mock("../hooks/use-comment-trigger-preview", () => ({
+vi.mock("../hooks/use-comment-trigger-preview", async () => ({
+  // Pure helpers (isNoteCommentDraft — the /note fill gate reads it) come
+  // through importActual untouched.
+  ...(await vi.importActual<typeof import("../hooks/use-comment-trigger-preview")>(
+    "../hooks/use-comment-trigger-preview",
+  )),
   useCommentTriggerPreview: () => ({ agents: [], blocked: [] }),
 }));
 
