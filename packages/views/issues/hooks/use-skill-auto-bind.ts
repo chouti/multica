@@ -37,8 +37,10 @@ import {
   type RefObject,
   type SetStateAction,
 } from "react";
+import { sameStringList } from "@multica/core/utils";
 import type { ContentEditorRef } from "../../editor/content-editor";
 import { useT } from "../../i18n";
+import type { UseCommentTriggerPreviewResult } from "./use-comment-trigger-preview";
 import { useRecommendedSkillAgent } from "./use-recommended-skill-agent";
 import { useSkillMentionAutoOpen } from "./use-skill-mention-auto-open";
 
@@ -47,7 +49,9 @@ export interface UseSkillAutoBindParams {
   issueId: string;
   /** Reply composers pass their parent comment id (thread-parent fast path). */
   parentId?: string;
-  content: string;
+  /** The composer's own trigger-preview result — see
+   *  useRecommendedSkillAgent's `preview` param for why it is injected. */
+  triggerPreview: Pick<UseCommentTriggerPreviewResult, "backendAgents" | "resolved">;
   /** Composer-held suppression set from the trigger chip strip. */
   suppressedAgentIds: ReadonlySet<string>;
   skillMentionAgents: Record<string, string[]>;
@@ -87,17 +91,11 @@ export interface UseSkillAutoBindResult {
   liveAnnouncement: string;
 }
 
-function sameIds(a: readonly string[], b: readonly string[]): boolean {
-  if (a === b) return true;
-  if (a.length !== b.length) return false;
-  return a.every((value, index) => value === b[index]);
-}
-
 export function useSkillAutoBind({
   wsId,
   issueId,
   parentId,
-  content,
+  triggerPreview,
   suppressedAgentIds,
   skillMentionAgents,
   setSkillMentionAgents,
@@ -112,7 +110,7 @@ export function useSkillAutoBind({
     wsId,
     issueId,
     parentId,
-    content,
+    preview: triggerPreview,
     suppressedAgentIds,
   });
   // Render-time mirror: the submit terminal fill must read the freshest
@@ -193,18 +191,20 @@ export function useSkillAutoBind({
     // Prune the typed-insertion record and the fill-once marks with the
     // designation map: once every chip for a skill is gone, a re-insertion
     // is eligible to fill again (KTD5). Touched is deliberately NOT pruned —
-    // an explicit gesture outlives the chip that received it.
-    insertedSkillIdsRef.current = new Set(
-      [...insertedSkillIdsRef.current].filter((id) => present.has(id)),
-    );
-    upgradableSkillIdsRef.current = new Set(
-      [...upgradableSkillIdsRef.current].filter((id) => present.has(id)),
-    );
+    // an explicit gesture outlives the chip that received it. The filter only
+    // removes, so an unchanged set keeps its reference (no allocation on the
+    // common typing tick).
+    const keepPresent = (ids: Set<string>) => {
+      const filtered = [...ids].filter((id) => present.has(id));
+      return filtered.length === ids.size ? ids : new Set(filtered);
+    };
+    insertedSkillIdsRef.current = keepPresent(insertedSkillIdsRef.current);
+    upgradableSkillIdsRef.current = keepPresent(upgradableSkillIdsRef.current);
     setFilledSkillIds((prev) => {
       const next = new Set([...prev].filter((id) => present.has(id)));
       return next.size === prev.size ? prev : next;
     });
-    setDocSkillIds((prev) => (sameIds(prev, ids) ? prev : ids));
+    setDocSkillIds((prev) => (sameStringList(prev, ids) ? prev : ids));
     setSkillMentionAgents((prev) => {
       const next = Object.fromEntries(
         Object.entries(prev).filter(([id]) => present.has(id)),

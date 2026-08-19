@@ -1,22 +1,21 @@
 import { createElement, type ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, renderHook } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { renderHook } from "@testing-library/react";
+import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import { api } from "@multica/core/api";
-import type { CommentTriggerPreview } from "@multica/core/types";
+import type { CommentTriggerPreviewAgent } from "@multica/core/types";
+import type { UseCommentTriggerPreviewResult } from "./use-comment-trigger-preview";
 import { useRecommendedSkillAgent } from "./use-recommended-skill-agent";
 
 vi.mock("@multica/core/api", () => ({
   api: {
     listAgents: vi.fn(),
-    previewCommentTriggers: vi.fn(),
     getIssue: vi.fn(),
     listTimeline: vi.fn(),
   },
 }));
 
 const listAgents = vi.mocked(api.listAgents);
-const previewCommentTriggers = vi.mocked(api.previewCommentTriggers);
 const getIssue = vi.mocked(api.getIssue);
 const listTimeline = vi.mocked(api.listTimeline);
 
@@ -53,6 +52,19 @@ const parentTimeline = [
   },
 ];
 
+const previewRow = (
+  id: string,
+  source: string,
+): CommentTriggerPreviewAgent =>
+  ({ id, name: id, source, reason: "" }) as CommentTriggerPreviewAgent;
+
+// The composer's preview instance is injected (same-query-key dedup); these
+// are its two recommendation-relevant states.
+const UNRESOLVED: Pick<UseCommentTriggerPreviewResult, "backendAgents" | "resolved"> = {
+  backendAgents: [],
+  resolved: false,
+};
+
 function createWrapper() {
   const queryClient = new QueryClient({
     defaultOptions: {
@@ -73,21 +85,15 @@ function renderRecommended(
       useRecommendedSkillAgent({
         wsId: "ws-1",
         issueId: "issue-1",
-        content: "please run the build",
+        preview: UNRESOLVED,
         ...props,
       }),
     { wrapper: createWrapper() },
   );
 }
 
-/** Keeps the debounced preview query in flight forever (cold-start window). */
-function keepPreviewInFlight() {
-  previewCommentTriggers.mockReturnValue(new Promise(() => {}));
-}
-
 describe("useRecommendedSkillAgent", () => {
   beforeEach(() => {
-    vi.useFakeTimers();
     listAgents.mockImplementation(() =>
       Promise.resolve([
         eligible(parentAgentId),
@@ -102,15 +108,13 @@ describe("useRecommendedSkillAgent", () => {
       assignee_type: "agent",
       assignee_id: assigneeAgentId,
     } as any);
-    keepPreviewInFlight();
   });
 
   afterEach(() => {
-    vi.useRealTimers();
     vi.clearAllMocks();
   });
 
-  it("bridges the cold start with the reply-parent agent while the preview is in flight", async () => {
+  it("bridges the cold start with the reply-parent agent while the preview is unresolved", async () => {
     const { result } = renderRecommended({ parentId: "parent-1" });
 
     await vi.waitFor(() => {
@@ -119,30 +123,23 @@ describe("useRecommendedSkillAgent", () => {
   });
 
   it("replaces the fast-path value with the async recommendation once the preview resolves", async () => {
-    let resolvePreview!: (preview: CommentTriggerPreview) => void;
-    previewCommentTriggers.mockReturnValue(
-      new Promise<CommentTriggerPreview>((resolve) => {
-        resolvePreview = resolve;
-      }),
+    const { result, rerender } = renderHook(
+      ({ preview }: { preview: Pick<UseCommentTriggerPreviewResult, "backendAgents" | "resolved"> }) =>
+        useRecommendedSkillAgent({
+          wsId: "ws-1",
+          issueId: "issue-1",
+          parentId: "parent-1",
+          preview,
+        }),
+      { wrapper: createWrapper(), initialProps: { preview: UNRESOLVED } },
     );
-
-    const { result } = renderRecommended({ parentId: "parent-1" });
 
     await vi.waitFor(() => {
       expect(result.current).toEqual({ id: parentAgentId, from: "fast-path" });
     });
 
-    await act(async () => {
-      resolvePreview({
-        agents: [
-          {
-            id: mentionedAgentId,
-            name: "Kim",
-            source: "mention_agent",
-            reason: "",
-          },
-        ],
-      });
+    rerender({
+      preview: { backendAgents: [previewRow(mentionedAgentId, "mention_agent")], resolved: true },
     });
 
     await vi.waitFor(() => {
@@ -151,12 +148,12 @@ describe("useRecommendedSkillAgent", () => {
   });
 
   it("returns null once the backend answers with zero candidates, overriding the fast path", async () => {
-    previewCommentTriggers.mockResolvedValue({ agents: [] });
+    const { result } = renderRecommended({
+      parentId: "parent-1",
+      preview: { backendAgents: [], resolved: true },
+    });
 
-    const { result } = renderRecommended({ parentId: "parent-1" });
-
-    // Fast-path value shows first, then the resolved-empty answer wins —
-    // and an answered-with-zero is authoritative ("async"), not a fallback.
+    // An answered-with-zero is authoritative ("async"), not a fallback.
     await vi.waitFor(() => {
       expect(result.current).toEqual({ id: null, from: "async" });
     });
@@ -209,19 +206,21 @@ describe("useRecommendedSkillAgent", () => {
 
     const { result } = renderRecommended();
 
-    await act(async () => {});
-    expect(result.current.id).toBeNull();
+    await vi.waitFor(() => {
+      expect(result.current.id).toBeNull();
+    });
   });
 
   it("ranks only eligible backend rows once the preview resolves", async () => {
-    previewCommentTriggers.mockResolvedValue({
-      agents: [
-        { id: archivedAgentId, name: "A", source: "mention_agent", reason: "" },
-        { id: assigneeAgentId, name: "C", source: "issue_assignee", reason: "" },
-      ],
+    const { result } = renderRecommended({
+      preview: {
+        backendAgents: [
+          previewRow(archivedAgentId, "mention_agent"),
+          previewRow(assigneeAgentId, "issue_assignee"),
+        ],
+        resolved: true,
+      },
     });
-
-    const { result } = renderRecommended();
 
     await vi.waitFor(() => {
       // The top-tier mention row fails the visibility check (archived), so
@@ -230,12 +229,19 @@ describe("useRecommendedSkillAgent", () => {
     });
   });
 
-  it("returns null for empty content with no fast-path inputs", async () => {
+  it("treats a preview result missing the recommendation fields as unresolved", async () => {
+    // API-drift pin: a stale mock (or an older shape sneaking through) lacks
+    // backendAgents/resolved — the hook must degrade to the fast path, never
+    // crash and never treat the gap as an authoritative empty answer.
     getIssue.mockResolvedValue({ assignee_type: null, assignee_id: null } as any);
 
-    const { result } = renderRecommended({ content: "" });
+    const { result } = renderRecommended({
+      parentId: "parent-1",
+      preview: {} as Pick<UseCommentTriggerPreviewResult, "backendAgents" | "resolved">,
+    });
 
-    await act(async () => {});
-    expect(result.current.id).toBeNull();
+    await vi.waitFor(() => {
+      expect(result.current).toEqual({ id: parentAgentId, from: "fast-path" });
+    });
   });
 });

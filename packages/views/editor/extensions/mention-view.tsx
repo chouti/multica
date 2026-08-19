@@ -25,7 +25,7 @@
  * the wrapper is the outermost inline element.
  */
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { NodeViewWrapper } from "@tiptap/react";
 import type { Editor, NodeViewProps } from "@tiptap/react";
 import { isActorMentionType } from "@multica/core/mention";
@@ -122,10 +122,16 @@ function SkillMention({
   const context = useSkillMentionContext();
   const selectedAgentIds = context?.skillMentionAgents[skillId] ?? [];
   const open = context?.openPopoverFor === skillId;
+  const setOpenPopoverFor = context?.setOpenPopoverFor;
   const setOpen = (next: boolean) => {
     if (!context) return;
     context.setOpenPopoverFor(next ? skillId : null);
   };
+  // Own popover only: a document-wide `[data-slot="popover-content"]` query
+  // grabs the FIRST popover in the DOM — e.g. an agent-activity popover that
+  // mounts keepMounted at page load — and would route Tab into the wrong
+  // layer. This ref scopes the focus handoff to the picker this chip renders.
+  const popupRef = useRef<HTMLDivElement>(null);
 
   // U3/KTD4 — the auto-opened popover must not steal focus: the caret stays
   // in the editor and drives the popover from there. While open, a capture
@@ -135,7 +141,7 @@ function SkillMention({
   // keystroke closes it and keeps typing. Once focus is inside the list the
   // picker owns its keys (arrow navigation + Enter live there).
   useEffect(() => {
-    if (!open || !context) return;
+    if (!open || !setOpenPopoverFor) return;
     const editorDom = editor?.view?.dom as HTMLElement | null | undefined;
     if (!editorDom) return;
     const onKeyDown = (event: KeyboardEvent) => {
@@ -143,16 +149,13 @@ function SkillMention({
       if (isImeComposing(event)) return;
       const active = document.activeElement;
       const focusInEditor = active instanceof Node && editorDom.contains(active);
-      const popup = document.querySelector<HTMLElement>(
-        '[data-slot="popover-content"]',
-      );
 
-      if (event.key === "Escape" || event.key === "Esc") {
+      if (event.key === "Escape") {
         // Only the popover closes — the keypress is stopped here so it cannot
         // bubble on to a host Dialog and discard the draft (MUL-5429).
         event.preventDefault();
         event.stopPropagation();
-        context.setOpenPopoverFor(null);
+        setOpenPopoverFor(null);
         if (!focusInEditor) {
           // Focus was inside the (now closing) list — return the caret to
           // the editor so typing continues where it left off.
@@ -164,7 +167,7 @@ function SkillMention({
       // Everything below is the editor-resident path.
       if (!focusInEditor) return;
       if (event.key === "Tab" || event.key === "ArrowDown") {
-        const firstRow = popup?.querySelector<HTMLElement>("button");
+        const firstRow = popupRef.current?.querySelector<HTMLElement>("button");
         if (firstRow) {
           event.preventDefault();
           firstRow.focus();
@@ -183,14 +186,17 @@ function SkillMention({
           event.key === "Delete" ||
           event.key === "Enter")
       ) {
-        context.setOpenPopoverFor(null);
+        setOpenPopoverFor(null);
       }
     };
     document.addEventListener("keydown", onKeyDown, true);
     return () => {
       document.removeEventListener("keydown", onKeyDown, true);
     };
-  }, [open, context, editor]);
+    // `setOpenPopoverFor` is a composer useState setter (stable); depending
+    // on the whole `context` object would remount the capture listener on
+    // every composer re-render (the composers build the context inline).
+  }, [open, setOpenPopoverFor, editor]);
 
   const chip = (
     <SkillMentionChip
@@ -227,8 +233,9 @@ function SkillMention({
         </PopoverTrigger>
       </MentionHoverCard>
       {/* initialFocus=false keeps the caret in the editor for both the
-          auto-open and the manual click — the popover is non-modal. */}
-      <PopoverContent align="start" className="w-72" initialFocus={false}>
+          auto-open and the manual click — the popover is non-modal. The ref
+          scopes the Tab/ArrowDown focus handoff to this popover (see above). */}
+      <PopoverContent align="start" className="w-72" initialFocus={false} ref={popupRef}>
         <SkillAgentPicker
           skillId={skillId}
           fallbackSkillName={name}

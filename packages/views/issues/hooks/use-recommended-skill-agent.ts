@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { isAgentRuntimeBound } from "@multica/core/agents";
 import {
@@ -8,7 +9,7 @@ import {
 } from "@multica/core/issues/queries";
 import { recommendSkillMentionAgent } from "@multica/core/issues/skill-mention-recommendation";
 import { agentListOptions } from "@multica/core/workspace/queries";
-import { useCommentTriggerPreview } from "./use-comment-trigger-preview";
+import type { UseCommentTriggerPreviewResult } from "./use-comment-trigger-preview";
 
 const EMPTY_SUPPRESSED: ReadonlySet<string> = new Set();
 
@@ -16,8 +17,14 @@ export interface UseRecommendedSkillAgentParams {
   wsId: string;
   issueId: string;
   parentId?: string;
-  editingCommentId?: string;
-  content: string;
+  /**
+   * The composer's own trigger-preview result, injected instead of
+   * re-instantiated: `backendAgents`/`resolved` depend only on the query key
+   * (issue/parent/debounced signature), so the composer's instance answers
+   * identically while each keystroke parses the mention signature once
+   * instead of twice.
+   */
+  preview: Pick<UseCommentTriggerPreviewResult, "backendAgents" | "resolved">;
   /**
    * Agent ids the user explicitly suppressed in the popover ("don't run"
    * gesture, KTD5). Suppressed ids are never recommended.
@@ -63,38 +70,38 @@ export function useRecommendedSkillAgent({
   wsId,
   issueId,
   parentId,
-  editingCommentId,
-  content,
+  preview,
   suppressedAgentIds,
   replyParentAgentId,
 }: UseRecommendedSkillAgentParams): SkillAgentRecommendation {
-  const preview = useCommentTriggerPreview({
-    issueId,
-    parentId,
-    editingCommentId,
-    content,
-  });
-
   // Recommendation-side visibility is stricter than the picker: an
   // auto-recommendation must be actionable, so the agent must be unarchived
   // AND runtime-bound. Manual selection in the picker may still target an
   // unbound agent — that difference is intentional.
   const agentsQuery = useQuery(agentListOptions(wsId));
-  const eligibleAgentIds = new Set(
-    (agentsQuery.data ?? [])
-      .filter((a) => !a.archived_at && isAgentRuntimeBound(a))
-      .map((a) => a.id),
+  const eligibleAgentIds = useMemo(
+    () =>
+      new Set(
+        (agentsQuery.data ?? [])
+          .filter((a) => !a.archived_at && isAgentRuntimeBound(a))
+          .map((a) => a.id),
+      ),
+    [agentsQuery.data],
   );
 
   const timelineQuery = useQuery({
     ...issueTimelineOptions(issueId),
     enabled: !!parentId,
   });
-  const parentEntry = parentId
-    ? timelineQuery.data?.find(
-        (entry) => entry.type === "comment" && entry.id === parentId,
-      )
-    : undefined;
+  const parentEntry = useMemo(
+    () =>
+      parentId
+        ? timelineQuery.data?.find(
+            (entry) => entry.type === "comment" && entry.id === parentId,
+          )
+        : undefined,
+    [timelineQuery.data, parentId],
+  );
   const timelineParentAgentId =
     parentEntry && parentEntry.actor_type === "agent" ? parentEntry.actor_id : null;
 

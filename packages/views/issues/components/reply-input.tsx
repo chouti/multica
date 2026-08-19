@@ -85,14 +85,23 @@ function ReplyInput({
   );
   // Composer-owned popover-open state, keyed by skill id (see comment-input).
   const [openPopoverFor, setOpenPopoverFor] = useState<string | null>(null);
+  // Skill-designated agents surfaced as preview chips (see comment-input).
+  const skillDesignatedAgents = useSkillDesignatedPreviewAgents(wsId, skillMentionAgents);
+  const triggerPreview = useCommentTriggerPreview({
+    issueId,
+    parentId,
+    content,
+    skillDesignatedAgents,
+  });
   // U4/KTD5: the auto-bind engine (recommendation fill, guards, suppress
   // interplay, submit terminal fill) with the U3 auto-open gate inside —
-  // same as the top-level composer, plus the thread-parent fast path.
+  // same as the top-level composer, plus the thread-parent fast path. The
+  // preview result is injected (not re-instantiated) — see comment-input.
   const autoBind = useSkillAutoBind({
     wsId,
     issueId,
     parentId,
-    content,
+    triggerPreview,
     suppressedAgentIds,
     skillMentionAgents,
     setSkillMentionAgents,
@@ -113,14 +122,6 @@ function ReplyInput({
     touchedSkillIds: autoTouchedSkillIds,
     filledSkillIds: autoFilledSkillIds,
   } = autoBind;
-  // Skill-designated agents surfaced as preview chips (see comment-input).
-  const skillDesignatedAgents = useSkillDesignatedPreviewAgents(wsId, skillMentionAgents);
-  const triggerPreview = useCommentTriggerPreview({
-    issueId,
-    parentId,
-    content,
-    skillDesignatedAgents,
-  });
   // Uploads for this reply session (MUL-5181) — owned by the coordinator. With
   // a draftKey they persist in the draft store so scroll-out/close no longer
   // drops an in-flight upload; without one (no persistence context) they fall
@@ -145,21 +146,28 @@ function ReplyInput({
     onDrop: lazy.uploadOrQueue,
   });
 
+  // One payload builder for both persistence sites (flush + editor onChange)
+  // — see CommentInput. Only built when a draftKey exists (keyless replies
+  // persist nothing).
+  const persistDraft = useCallback(
+    (md: string) => {
+      if (!draftKey) return;
+      setDraftPayload(draftKey, {
+        content: md,
+        skillMentionAgents,
+        touchedSkillIds: autoTouchedSkillIds.size > 0 ? [...autoTouchedSkillIds] : undefined,
+        filledSkillIds: autoFilledSkillIds.size > 0 ? [...autoFilledSkillIds] : undefined,
+      });
+    },
+    [draftKey, setDraftPayload, skillMentionAgents, autoTouchedSkillIds, autoFilledSkillIds],
+  );
   // Flush on tab close / mobile background — same rationale as CommentInput.
   useEffect(() => {
     if (!draftKey) return;
     const flush = () => {
       const md = editorRef.current?.getMarkdown();
       if (md && md.trim().length > 0) {
-        // Persist content + skill-mention designations + the U4 auto-bind
-        // guards together so a restored draft rehydrates all of them
-        // (review finding #7, KTD5).
-        setDraftPayload(draftKey, {
-          content: md,
-          skillMentionAgents,
-          touchedSkillIds: autoTouchedSkillIds.size > 0 ? [...autoTouchedSkillIds] : undefined,
-          filledSkillIds: autoFilledSkillIds.size > 0 ? [...autoFilledSkillIds] : undefined,
-        });
+        persistDraft(md);
       }
     };
     const onVis = () => { if (document.visibilityState === "hidden") flush(); };
@@ -169,7 +177,7 @@ function ReplyInput({
       document.removeEventListener("visibilitychange", onVis);
       window.removeEventListener("pagehide", flush);
     };
-  }, [draftKey, setDraftPayload, skillMentionAgents, autoTouchedSkillIds, autoFilledSkillIds]);
+  }, [draftKey, persistDraft]);
 
   // Issue/parent scope change: reset per-thread state. Mount is skipped on
   // purpose so a hydrated draft (content + designations + U4 guards) survives
@@ -317,17 +325,12 @@ function ReplyInput({
             onUpdate={(md) => {
               setContent(md);
               setIsEmpty(!md.trim());
-              // Debounced upstream (debounceMs=100). setDraftPayload carries
-              // the skill-mention designations and the U4 guards alongside
-              // the text (review #7, KTD5) and preserves pending
-              // attachments; an empty body with no uploads/designations
-              // drops the entry via writeDraft.
-              if (draftKey) setDraftPayload(draftKey, {
-                content: md,
-                skillMentionAgents,
-                touchedSkillIds: autoTouchedSkillIds.size > 0 ? [...autoTouchedSkillIds] : undefined,
-                filledSkillIds: autoFilledSkillIds.size > 0 ? [...autoFilledSkillIds] : undefined,
-              });
+              // Debounced upstream (debounceMs=100). persistDraft (no-op
+              // without a draftKey) carries the skill-mention designations
+              // and the U4 guards alongside the text (review #7, KTD5) and
+              // preserves pending attachments; an empty body with no
+              // uploads/designations drops the entry via writeDraft.
+              persistDraft(md);
               syncSkillMentionsWithDoc();
             }}
             onSubmit={submit}

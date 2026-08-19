@@ -79,16 +79,21 @@ vi.mock("@multica/ui/components/ui/popover", () => {
     PopoverContent: ({
       children,
       initialFocus,
+      ...props
     }: {
       children: React.ReactNode;
       initialFocus?: boolean | unknown;
     }) => {
       if (!_open) return null;
+      // `ref` rides the rest-props spread (React 19 ref-as-prop) — the
+      // component under test scopes the Tab/ArrowDown focus handoff to its
+      // own popup through that ref, so the mock must forward it.
       return (
         <div
           data-testid="popover-content"
           data-slot="popover-content"
           data-initial-focus={String(initialFocus)}
+          {...props}
         >
           {children}
         </div>
