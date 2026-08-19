@@ -52,7 +52,12 @@ vi.mock("../../common/actor-avatar", () => ({
   ActorAvatar: () => null,
 }));
 
-vi.mock("../hooks/use-comment-trigger-preview", () => ({
+vi.mock("../hooks/use-comment-trigger-preview", async () => ({
+  // Pure helpers (isNoteCommentDraft — the /note fill gate reads it) come
+  // through importActual untouched.
+  ...(await vi.importActual<typeof import("../hooks/use-comment-trigger-preview")>(
+    "../hooks/use-comment-trigger-preview",
+  )),
   useCommentTriggerPreview: () => ({
     agents: previewState.agents,
     blocked: [],

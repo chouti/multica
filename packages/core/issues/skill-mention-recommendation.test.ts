@@ -1,7 +1,11 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
 import type { CommentTriggerPreviewAgent } from "../types";
-import { recommendSkillMentionAgent } from "./skill-mention-recommendation";
+import {
+  recommendSkillMentionAgent,
+  recommendSkillMentionAgentWithTier,
+  skillMentionSourcePriority,
+} from "./skill-mention-recommendation";
 
 // Recommendation-side visibility set: unarchived AND runtime-bound agents.
 // The caller (hook) computes it; the pure function only consumes it.
@@ -138,6 +142,47 @@ describe("recommendSkillMentionAgent", () => {
 
       const rowsOnly = [row("agent-x", "some_future_source")];
       expect(recommendSkillMentionAgent(rowsOnly, ALL_ELIGIBLE, new Set())).toBe("agent-x");
+    });
+  });
+
+  // The tier-aware variant feeds the one-shot upgrade gate (review finding
+  // #4): a fill's replacement rule compares the winning rows' source ranks.
+  describe("recommendSkillMentionAgentWithTier", () => {
+    it("reports the winning row's tier rank alongside its id", () => {
+      const rows = [row("agent-x", "issue_assignee"), row("agent-y", "mention_agent")];
+      expect(recommendSkillMentionAgentWithTier(rows, ALL_ELIGIBLE, new Set())).toEqual({
+        id: "agent-y",
+        tier: skillMentionSourcePriority("mention_agent"),
+      });
+      expect(skillMentionSourcePriority("mention_agent")).toBeLessThan(
+        skillMentionSourcePriority("issue_assignee"),
+      );
+    });
+
+    it("returns tier Infinity when no row wins (null id)", () => {
+      expect(
+        recommendSkillMentionAgentWithTier([], ALL_ELIGIBLE, new Set()),
+      ).toEqual({ id: null, tier: Number.POSITIVE_INFINITY });
+    });
+
+    it("ranks an unknown source at Infinity — never strictly outranked by a known tier above it", () => {
+      // A future-source fill stays replaceable by any known tier; the strict
+      // outrank comparison excludes equality, so Infinity vs Infinity (two
+      // unknown tiers) never flips.
+      const rows = [row("agent-x", "some_future_source")];
+      expect(
+        recommendSkillMentionAgentWithTier(rows, ALL_ELIGIBLE, new Set()),
+      ).toEqual({ id: "agent-x", tier: Number.POSITIVE_INFINITY });
+      expect(skillMentionSourcePriority("some_future_source")).toBe(
+        Number.POSITIVE_INFINITY,
+      );
+    });
+
+    it("mention_skill exclusion falls through to the next row's tier", () => {
+      const rows = [row("agent-x", "mention_skill"), row("agent-y", "thread_parent")];
+      expect(
+        recommendSkillMentionAgentWithTier(rows, ALL_ELIGIBLE, new Set()),
+      ).toEqual({ id: "agent-y", tier: skillMentionSourcePriority("thread_parent") });
     });
   });
 });

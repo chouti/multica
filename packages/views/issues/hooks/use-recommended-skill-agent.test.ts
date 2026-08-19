@@ -118,7 +118,11 @@ describe("useRecommendedSkillAgent", () => {
     const { result } = renderRecommended({ parentId: "parent-1" });
 
     await vi.waitFor(() => {
-      expect(result.current).toEqual({ id: parentAgentId, from: "fast-path" });
+      expect(result.current).toEqual({
+        id: parentAgentId,
+        tier: 1,
+        from: "fast-path",
+      });
     });
   });
 
@@ -135,7 +139,7 @@ describe("useRecommendedSkillAgent", () => {
     );
 
     await vi.waitFor(() => {
-      expect(result.current).toEqual({ id: parentAgentId, from: "fast-path" });
+      expect(result.current).toEqual({ id: parentAgentId, tier: 1, from: "fast-path" });
     });
 
     rerender({
@@ -143,7 +147,7 @@ describe("useRecommendedSkillAgent", () => {
     });
 
     await vi.waitFor(() => {
-      expect(result.current).toEqual({ id: mentionedAgentId, from: "async" });
+      expect(result.current).toEqual({ id: mentionedAgentId, tier: 0, from: "async" });
     });
   });
 
@@ -155,7 +159,11 @@ describe("useRecommendedSkillAgent", () => {
 
     // An answered-with-zero is authoritative ("async"), not a fallback.
     await vi.waitFor(() => {
-      expect(result.current).toEqual({ id: null, from: "async" });
+      expect(result.current).toEqual({
+        id: null,
+        tier: Number.POSITIVE_INFINITY,
+        from: "async",
+      });
     });
   });
 
@@ -171,7 +179,7 @@ describe("useRecommendedSkillAgent", () => {
     const { result } = renderRecommended({ parentId: "parent-1" });
 
     await vi.waitFor(() => {
-      expect(result.current).toEqual({ id: assigneeAgentId, from: "fast-path" });
+      expect(result.current).toEqual({ id: assigneeAgentId, tier: 3, from: "fast-path" });
     });
   });
 
@@ -225,7 +233,7 @@ describe("useRecommendedSkillAgent", () => {
     await vi.waitFor(() => {
       // The top-tier mention row fails the visibility check (archived), so
       // the recommendation-side check skips it for the visible assignee.
-      expect(result.current).toEqual({ id: assigneeAgentId, from: "async" });
+      expect(result.current).toEqual({ id: assigneeAgentId, tier: 3, from: "async" });
     });
   });
 
@@ -241,7 +249,7 @@ describe("useRecommendedSkillAgent", () => {
     });
 
     await vi.waitFor(() => {
-      expect(result.current).toEqual({ id: parentAgentId, from: "fast-path" });
+      expect(result.current).toEqual({ id: parentAgentId, tier: 1, from: "fast-path" });
     });
   });
 });

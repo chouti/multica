@@ -23,6 +23,10 @@ import { agentListOptions } from "@multica/core/workspace/queries";
 export function useSkillMentionAutoOpen(
   wsId: string,
   setOpenPopoverFor: (skillId: string | null) => void,
+  /** Live chip-presence check. The in-flight tail consults it so a held
+   *  auto-open request is dropped when its chip was deleted before the agent
+   *  list settled (review finding #10, KTD3). */
+  isSkillPresent?: (skillId: string) => boolean,
 ): (skillId: string) => void {
   const { data: agents, isLoading } = useQuery(agentListOptions(wsId));
   // Same visibility rule as the picker itself: archived agents cannot be
@@ -43,12 +47,16 @@ export function useSkillMentionAutoOpen(
   );
 
   // The in-flight tail: fire (or drop) the held request when the list settles.
+  // A chip deleted while the list was loading drops the request — the slot
+  // must not survive to re-target a later pasted chip (KTD3).
   useEffect(() => {
     const pending = pendingSkillRef.current;
     if (!pending || isLoading) return;
     pendingSkillRef.current = null;
-    if (hasBindableAgents) setOpenPopoverFor(pending);
-  }, [isLoading, hasBindableAgents, setOpenPopoverFor]);
+    if (hasBindableAgents && isSkillPresent?.(pending) !== false) {
+      setOpenPopoverFor(pending);
+    }
+  }, [isLoading, hasBindableAgents, setOpenPopoverFor, isSkillPresent]);
 
   return handleSkillMentionInserted;
 }

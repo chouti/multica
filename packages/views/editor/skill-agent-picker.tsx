@@ -82,12 +82,16 @@ export function SkillAgentPicker({
   // U3/R4 — the keyboard-only path through the list: the popover can open
   // without stealing focus (KTD4), Tab hands focus to the first row, and
   // ArrowUp/ArrowDown then walk the rows (wrapping). Enter activates the
-  // focused row via the button's native key behavior.
+  // focused row via the button's native key behavior. Rows are located by
+  // the `data-agent-row` hook, not by tag name, so a future non-row button
+  // inside the popover cannot hijack the cycle (review finding #8).
   const listRef = useRef<HTMLDivElement>(null);
   const handleListKeyDown = (event: React.KeyboardEvent) => {
     if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
     const rows = Array.from(
-      listRef.current?.querySelectorAll<HTMLButtonElement>("button") ?? [],
+      listRef.current?.querySelectorAll<HTMLButtonElement>(
+        "[data-agent-row]",
+      ) ?? [],
     );
     if (rows.length === 0) return;
     event.preventDefault();
@@ -120,6 +124,7 @@ export function SkillAgentPicker({
               <button
                 key={agent.id}
                 type="button"
+                data-agent-row
                 aria-pressed={selected}
                 aria-label={t(($) => $.mention.skill_agent_row_aria, {
                   name: agent.name,

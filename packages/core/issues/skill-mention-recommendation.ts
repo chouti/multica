@@ -13,6 +13,54 @@ const SOURCE_PRIORITY: Readonly<Record<string, number>> = {
 };
 
 /**
+ * The source-tier rank of a backend trigger row (KTD1 lattice). Lower ranks
+ * higher; unknown sources rank below every known tier.
+ */
+export function skillMentionSourcePriority(source: string): number {
+  return SOURCE_PRIORITY[source] ?? Number.POSITIVE_INFINITY;
+}
+
+export interface SkillMentionRecommendationWithTier {
+  id: string | null;
+  /** Rank of the winning row's source tier — `skillMentionSourcePriority`.
+   *  `Infinity` when no row wins. Consumers use it to decide whether a later
+   *  answer strictly outranks an earlier fill (review finding #4). */
+  tier: number;
+}
+
+/**
+ * Tier-aware variant of {@link recommendSkillMentionAgent}: identical
+ * selection, plus the winning row's source-tier rank. Same input contract
+ * (UNMERGED backend rows, eligibility set, suppression set).
+ */
+export function recommendSkillMentionAgentWithTier(
+  backendRows: readonly CommentTriggerPreviewAgent[],
+  eligibleAgentIds: ReadonlySet<string>,
+  suppressedAgentIds: ReadonlySet<string>,
+): SkillMentionRecommendationWithTier {
+  let best: SkillMentionRecommendationWithTier = {
+    id: null,
+    tier: Number.POSITIVE_INFINITY,
+  };
+
+  for (const row of backendRows ?? []) {
+    if (row.source === "mention_skill") continue;
+    if (suppressedAgentIds.has(row.id)) continue;
+    if (!eligibleAgentIds.has(row.id)) continue;
+
+    const priority = skillMentionSourcePriority(row.source);
+    // Strict compare keeps the earliest row within a tier (backend order). The
+    // null check lets the first surviving row win even at Infinity priority
+    // (an unknown source against the Infinity sentinel).
+    if (best.id === null || priority < best.tier) {
+      best = { id: row.id, tier: priority };
+    }
+  }
+
+  return best;
+}
+
+/**
  * Pick the recommended agent id for a skill-mention popover in the current
  * composer context, or `null` when no candidate survives.
  *
@@ -41,23 +89,9 @@ export function recommendSkillMentionAgent(
   eligibleAgentIds: ReadonlySet<string>,
   suppressedAgentIds: ReadonlySet<string>,
 ): string | null {
-  let bestId: string | null = null;
-  let bestPriority = Number.POSITIVE_INFINITY;
-
-  for (const row of backendRows ?? []) {
-    if (row.source === "mention_skill") continue;
-    if (suppressedAgentIds.has(row.id)) continue;
-    if (!eligibleAgentIds.has(row.id)) continue;
-
-    const priority = SOURCE_PRIORITY[row.source] ?? Number.POSITIVE_INFINITY;
-    // Strict compare keeps the earliest row within a tier (backend order). The
-    // null check lets the first surviving row win even at Infinity priority
-    // (an unknown source against the Infinity sentinel).
-    if (bestId === null || priority < bestPriority) {
-      bestId = row.id;
-      bestPriority = priority;
-    }
-  }
-
-  return bestId;
+  return recommendSkillMentionAgentWithTier(
+    backendRows,
+    eligibleAgentIds,
+    suppressedAgentIds,
+  ).id;
 }

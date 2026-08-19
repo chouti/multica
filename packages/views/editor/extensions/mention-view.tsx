@@ -167,7 +167,11 @@ function SkillMention({
       // Everything below is the editor-resident path.
       if (!focusInEditor) return;
       if (event.key === "Tab" || event.key === "ArrowDown") {
-        const firstRow = popupRef.current?.querySelector<HTMLElement>("button");
+        // Row hook, not tag name — see SkillAgentPicker's data-agent-row
+        // (review finding #8).
+        const firstRow = popupRef.current?.querySelector<HTMLElement>(
+          "[data-agent-row]",
+        );
         if (firstRow) {
           event.preventDefault();
           firstRow.focus();

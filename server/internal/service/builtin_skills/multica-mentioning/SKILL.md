@@ -108,8 +108,11 @@ The backend therefore relies on the composer to name the agent(s) for every
 skill mention in the comment.
 
 The composer carries that map as `skill_mention_agents` (keyed by the skill id
-in the mention link, valued as the list of agent ids the user picked from the
-skill's chip UI). It is wired through create/edit comment requests and lands in
+in the mention link, valued as the list of agent ids designated through the
+skill's chip picker — a user pick, or, since the composer auto-bind default
+(2026-08-18), the applied-by-default recommended agent the user accepts by
+dismissing the picker). It is wired through create/edit comment requests and
+lands in
 `bindAndEnqueueSkillMentions` (`server/internal/handler/comment.go`), which is
 called ONLY from the create-time path — never from the read-only trigger
 preview, since binding is a side effect.

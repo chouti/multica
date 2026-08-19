@@ -111,8 +111,11 @@ vi.mock("../skill-agent-picker", () => ({
     onChange: (agentIds: string[]) => void;
   }) => (
     <div>
+      {/* data-agent-row mirrors the real picker's row hook — the Tab/ArrowDown
+          walkers in mention-view locate rows through it (review finding #8). */}
       <button
         type="button"
+        data-agent-row
         data-testid="skill-picker-select-agent"
         onClick={() => onChange([...selectedAgentIds, "agent-1"])}
       >
@@ -120,6 +123,7 @@ vi.mock("../skill-agent-picker", () => ({
       </button>
       <button
         type="button"
+        data-agent-row
         data-testid="skill-picker-clear"
         onClick={() => onChange([])}
       >

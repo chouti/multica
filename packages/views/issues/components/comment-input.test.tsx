@@ -70,7 +70,12 @@ vi.mock("../../common/actor-avatar", () => ({
 // The trigger-preview hook is mocked with controllable state: `agents` feeds
 // the chips strip (the suppress gesture lives there), `backendAgents` +
 // `resolved` feed the U4 recommendation path through useRecommendedSkillAgent.
-vi.mock("../hooks/use-comment-trigger-preview", () => ({
+// The module's pure helpers (isNoteCommentDraft — the /note fill gate reads
+// it) come through importActual untouched.
+vi.mock("../hooks/use-comment-trigger-preview", async () => ({
+  ...(await vi.importActual<typeof import("../hooks/use-comment-trigger-preview")>(
+    "../hooks/use-comment-trigger-preview",
+  )),
   useCommentTriggerPreview: () => ({
     agents: previewState.agents,
     blocked: [],
@@ -459,6 +464,47 @@ describe("skill mention auto-open popover (U3)", () => {
       }),
     );
   });
+
+  it("clears the popover slot when the chip it targets disappears from the doc (review #10)", async () => {
+    apiListAgents.mockResolvedValue([agentFixture("agent-1")]);
+    renderCommentInput();
+    activateComposer("comment-composer-shell");
+    await screen.findByTestId("skill-panel");
+
+    fireEvent.click(screen.getByTestId("click-chip"));
+    expect(popoverTarget()).toBe("skill-1");
+
+    // Cmd+Z / delete removes every chip — the slot must not survive to
+    // re-target a later pasted chip of the same skill (KTD3).
+    fireEvent.click(screen.getByTestId("remove-skill-chip"));
+    await act(async () => {});
+
+    expect(popoverTarget()).toBe("");
+  });
+
+  it("drops a held auto-open request when its chip is deleted before the agent list settles (review #10)", async () => {
+    let resolveAgents!: (agents: unknown[]) => void;
+    apiListAgents.mockReturnValue(
+      new Promise((resolve) => {
+        resolveAgents = resolve;
+      }),
+    );
+    renderCommentInput();
+    activateComposer("comment-composer-shell");
+    await screen.findByTestId("skill-panel");
+
+    // Typed insert while the list is in flight: the request is held.
+    fireEvent.click(screen.getByTestId("menu-insert-skill"));
+    expect(popoverTarget()).toBe("");
+
+    // Chip deleted before the list settles — the held request must drop.
+    fireEvent.click(screen.getByTestId("remove-skill-chip"));
+    await act(async () => {
+      resolveAgents([agentFixture("agent-1")]);
+    });
+
+    expect(popoverTarget()).toBe("");
+  });
 });
 
 // U4 — auto-fill + dismiss=accept + override semantics (R3/R4/R6, KTD5).
@@ -801,5 +847,146 @@ describe("skill mention auto-bind (U4)", () => {
     await act(async () => {});
     await act(async () => {});
     expect(designations()).toEqual({});
+  });
+
+  it("an authoritative empty answer removes a fast-path fill and sends no designations (review #3)", async () => {
+    apiListAgents.mockResolvedValue([agentFixture("agent-1")]);
+    // Fast-path fill: the issue assignee answers synchronously.
+    apiGetIssue.mockResolvedValue({ assignee_type: "agent", assignee_id: "agent-1" });
+    const { container, onSubmit } = renderCommentInput();
+    activateComposer("comment-composer-shell");
+    await screen.findByTestId("skill-panel");
+
+    fireEvent.click(screen.getByTestId("menu-insert-skill"));
+    await waitFor(() =>
+      expect(designations()).toEqual({ "skill-1": ["agent-1"] }),
+    );
+
+    // The preview resolves with zero candidates — the fast-path fill is a
+    // temporary value and must be withdrawn, not kept silently.
+    previewState.backendAgents = [];
+    previewState.resolved = true;
+    await driveRecUpdate();
+
+    expect(designations()).toEqual({});
+    fireEvent.change(screen.getByTestId("editor"), { target: { value: "hello" } });
+    fireEvent.click(getSubmitButton(container));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit.mock.calls[0]![3]).toBeUndefined();
+  });
+
+  it("an explicit gesture survives chip removal — re-insertion does not re-fill (review #3)", async () => {
+    apiListAgents.mockResolvedValue([agentFixture("agent-1"), agentFixture("agent-2")]);
+    previewState.backendAgents = [previewRow("agent-1")];
+    previewState.resolved = true;
+    renderCommentInput();
+    activateComposer("comment-composer-shell");
+    await screen.findByTestId("skill-panel");
+
+    fireEvent.click(screen.getByTestId("menu-insert-skill"));
+    await waitFor(() =>
+      expect(designations()).toEqual({ "skill-1": ["agent-1"] }),
+    );
+    // Manual pick marks the skill touched.
+    fireEvent.click(screen.getByTestId("designate-agent"));
+    expect(designations()).toEqual({ "skill-1": ["agent-2"] });
+
+    // Remove every chip, then re-insert: touched is deliberately not pruned
+    // with the doc, so the machine default stays out.
+    fireEvent.click(screen.getByTestId("remove-skill-chip"));
+    await act(async () => {});
+    expect(designations()).toEqual({});
+    fireEvent.click(screen.getByTestId("menu-insert-skill"));
+    await act(async () => {});
+    await act(async () => {});
+    expect(designations()).toEqual({});
+  });
+
+  it("an async-origin fill upgrades once when a strictly higher tier arrives, and only then (review #4)", async () => {
+    apiListAgents.mockResolvedValue([
+      agentFixture("agent-1"),
+      agentFixture("agent-2"),
+      agentFixture("agent-3"),
+    ]);
+    previewState.backendAgents = [previewRow("agent-1", "issue_assignee")];
+    previewState.resolved = true;
+    renderCommentInput();
+    activateComposer("comment-composer-shell");
+    await screen.findByTestId("skill-panel");
+
+    // The chip is typed while the preview is already resolved at the
+    // assignee tier — an async-origin fill (KTD5 sticky case).
+    fireEvent.click(screen.getByTestId("menu-insert-skill"));
+    await waitFor(() =>
+      expect(designations()).toEqual({ "skill-1": ["agent-1"] }),
+    );
+
+    // Same-tier answer (another assignee): sticky, no identity flicker.
+    previewState.backendAgents = [previewRow("agent-3", "issue_assignee")];
+    await driveRecUpdate();
+    expect(designations()).toEqual({ "skill-1": ["agent-1"] });
+
+    // An @agent mention typed after the chip strictly outranks the assignee
+    // fill and takes the skill exactly once (R5).
+    previewState.backendAgents = [previewRow("agent-2", "mention_agent")];
+    await driveRecUpdate();
+    expect(designations()).toEqual({ "skill-1": ["agent-2"] });
+
+    // The one-shot window is spent: another same-tier answer cannot flip it.
+    previewState.backendAgents = [previewRow("agent-3", "mention_agent")];
+    await driveRecUpdate();
+    expect(designations()).toEqual({ "skill-1": ["agent-2"] });
+  });
+
+  it("a /note draft never machine-fills, and a manual designation still lands (review #9)", async () => {
+    apiListAgents.mockResolvedValue([agentFixture("agent-1"), agentFixture("agent-2")]);
+    previewState.backendAgents = [previewRow("agent-1")];
+    previewState.resolved = true;
+    const { container, onSubmit } = renderCommentInput();
+    activateComposer("comment-composer-shell");
+    await screen.findByTestId("skill-panel");
+
+    // /note is the explicit "this comment triggers nothing" gesture.
+    fireEvent.change(screen.getByTestId("editor"), {
+      target: { value: "/note internal scratch" },
+    });
+    fireEvent.click(screen.getByTestId("menu-insert-skill"));
+    await act(async () => {});
+    await act(async () => {});
+    expect(designations()).toEqual({});
+
+    // A manual designation is the user's own statement and still lands.
+    fireEvent.click(screen.getByTestId("designate-agent"));
+    expect(designations()).toEqual({ "skill-1": ["agent-2"] });
+
+    // The terminal fill adds no machine entry on a /note draft either — the
+    // payload carries exactly the manual designation.
+    fireEvent.click(getSubmitButton(container));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit.mock.calls[0]![3]).toEqual({ "skill-1": ["agent-2"] });
+  });
+
+  it("removing the /note command re-opens the machine fill (review #9)", async () => {
+    apiListAgents.mockResolvedValue([agentFixture("agent-1")]);
+    previewState.backendAgents = [previewRow("agent-1")];
+    previewState.resolved = true;
+    renderCommentInput();
+    activateComposer("comment-composer-shell");
+    await screen.findByTestId("skill-panel");
+
+    fireEvent.change(screen.getByTestId("editor"), {
+      target: { value: "/note internal scratch" },
+    });
+    fireEvent.click(screen.getByTestId("menu-insert-skill"));
+    await act(async () => {});
+    expect(designations()).toEqual({});
+
+    // The draft flips out of note mode — the fill effect re-runs and binds.
+    fireEvent.change(screen.getByTestId("editor"), {
+      target: { value: "now a normal draft" },
+    });
+    await waitFor(() =>
+      expect(designations()).toEqual({ "skill-1": ["agent-1"] }),
+    );
   });
 });
