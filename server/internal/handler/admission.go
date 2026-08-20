@@ -39,6 +39,16 @@ const (
 	DispatchDeferred DispatchStatus = "deferred"
 	// DispatchBlocked: the run was refused. ReasonCode carries why.
 	DispatchBlocked DispatchStatus = "blocked"
+	// DispatchBound: the designation's durable agent_skill binding was written
+	// but no run was requested (bind-only — e.g. a backlog-parked issue create,
+	// or an edit-path designation of the current assignee). Issue @skill
+	// designation only; comment-path designations always enqueue.
+	DispatchBound DispatchStatus = "bound"
+	// DispatchMerged: the designation's trigger folded into a run that already
+	// exists for the same (issue, agent) — the create's natural assignee /
+	// squad-leader run, or an already-pending task. Exactly one run, already
+	// carrying the skill, results.
+	DispatchMerged DispatchStatus = "merged"
 )
 
 // DispatchReasonCode is the wire-facing admission reason. It aliases the

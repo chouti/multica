@@ -80,6 +80,15 @@ type IssueCreateParams struct {
 	// Stage groups this issue into an ordered barrier group under its parent
 	// (NULL = unstaged). See issue_child_done.go for the staged-barrier wake.
 	Stage pgtype.Int4
+	// SkillDesignations maps skill id → the agent ids designated for that skill
+	// on the create request (the issue description's @skill chips). The handler
+	// owns the gate — workspace resolution, description content coupling, and
+	// the per-agent invoke/archived/runtime checks (R15) — so every pair here
+	// is already admitted and this layer stays permission-free. The agent_skill
+	// rows are upserted inside the create transaction (R6, KTD2) so the issue's
+	// first run — enqueued right after commit — already resolves the
+	// designated skills into the agent's bundle.
+	SkillDesignations map[pgtype.UUID][]pgtype.UUID
 }
 
 // IssueCreateOpts groups optional knobs for IssueService.Create. Most
@@ -353,6 +362,29 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 			WorkspaceID: p.WorkspaceID,
 		}); err != nil {
 			return IssueCreateResult{}, fmt.Errorf("attach issue label: %w", err)
+		}
+	}
+
+	// Bind the gate-admitted @skill designations inside the create transaction
+	// (R6, KTD2): the durable agent_skill rows must commit atomically with the
+	// issue so the natural assignee/leader run enqueued right after commit
+	// already carries the designated skill. The handler pre-gated every pair
+	// (workspace resolution, description content coupling, invoke/archived/
+	// runtime checks), so this loop is permission-free; a failure aborts the
+	// create rather than committing the issue without its bindings. The upsert
+	// converges on enabled=TRUE regardless of prior row state (same primitive
+	// the comment path uses).
+	for skillID, agentIDs := range p.SkillDesignations {
+		for _, agentID := range agentIDs {
+			if !skillID.Valid || !agentID.Valid {
+				continue
+			}
+			if _, err := qtx.UpsertAgentSkillEnabled(ctx, db.UpsertAgentSkillEnabledParams{
+				AgentID: agentID,
+				SkillID: skillID,
+			}); err != nil {
+				return IssueCreateResult{}, fmt.Errorf("bind designated skill: %w", err)
+			}
 		}
 	}
 

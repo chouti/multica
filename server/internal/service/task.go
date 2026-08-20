@@ -1174,6 +1174,17 @@ func (s *TaskService) EnqueueTaskForMention(ctx context.Context, issue db.Issue,
 	return s.enqueueMentionTask(ctx, issue, agentID, triggerCommentID, false, pgtype.UUID{}, false, "", pgtype.UUID{}, pgtype.UUID{})
 }
 
+// EnqueueTaskForMentionWithActor is the issue-create @skill-designation
+// variant of EnqueueTaskForMention: the designation carries no trigger
+// comment, so the acting member is threaded directly as the accountable human
+// (MUL-4302 §4) instead of being resolved from a comment's authorship chain.
+// actorUserID is invalid when the caller has no member actor, in which case
+// attribution falls back to the issue's own provenance exactly like
+// EnqueueTaskForMention with an empty trigger comment.
+func (s *TaskService) EnqueueTaskForMentionWithActor(ctx context.Context, issue db.Issue, agentID pgtype.UUID, actorUserID pgtype.UUID) (db.AgentTaskQueue, error) {
+	return s.enqueueMentionTask(ctx, issue, agentID, pgtype.UUID{}, false, pgtype.UUID{}, false, "", actorUserID, pgtype.UUID{})
+}
+
 // EnqueueTaskForThreadParent creates a queued task for the agent who authored
 // the direct parent comment a member replied to.
 func (s *TaskService) EnqueueTaskForThreadParent(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID) (db.AgentTaskQueue, error) {

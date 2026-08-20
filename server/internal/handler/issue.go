@@ -78,6 +78,25 @@ type IssueResponse struct {
 	// preserves whatever labels are already in cache. nil pointer = "field
 	// absent, do not touch"; non-nil (incl. empty slice) = authoritative list.
 	Labels *[]LabelResponse `json:"labels,omitempty"`
+	// SkillDesignationOutcomes reports, per designated agent, how each @skill
+	// designation carried on this create/update request resolved (R16): bound
+	// (bind-only), queued (a run was enqueued), merged (folded into the
+	// create's own assignee/leader run or an already-pending task), or blocked
+	// with an enumeration-safe reason. Additive and populated only on responses
+	// to requests that carried skill_mention_agents; old clients ignore it.
+	SkillDesignationOutcomes []IssueSkillDesignationOutcome `json:"skill_designation_outcomes,omitempty"`
+}
+
+// IssueSkillDesignationOutcome is the per-agent result of one @skill
+// designation carried on an issue create/update request (R16, KTD10). It
+// mirrors the comment path's CommentTriggerOutcome shape; target_id is the
+// agent id the caller itself designated (already known to it), never a name,
+// so a blocked private target leaks nothing new.
+type IssueSkillDesignationOutcome struct {
+	TargetType string             `json:"target_type"` // always "agent"
+	TargetID   string             `json:"target_id"`
+	Status     DispatchStatus     `json:"status"` // queued | bound | merged | blocked
+	ReasonCode DispatchReasonCode `json:"reason_code"`
 }
 
 // validIssuePriorities mirrors the CHECK constraint on the issue table. Write
@@ -2733,12 +2752,13 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Validate the skill_mention_agents designation map shape at the boundary
-	// (malformed agent UUID / per-skill or map cap → 400 before any write).
-	// TODO(plan U2): the parsed map is intentionally discarded here until the
-	// create-path designation wiring (in-transaction binding + post-create
-	// enqueue) consumes it. Until then an absent or well-formed field is a
-	// no-op with zero behavior change.
-	if _, ok := parseSkillMentionAgents(w, req.SkillMentionAgents, "skill_mention_agents"); !ok {
+	// (malformed agent UUID / per-skill or map cap → 400 before any write). The
+	// parsed map is then gated against the workspace and the creator's invoke
+	// rights BEFORE IssueService.Create (R15); gate-admitted pairs are bound
+	// inside the create transaction (R6) and merged or enqueued post-create
+	// (R7/R8), with per-agent outcomes on the response (R16).
+	skillMentionAgents, ok := parseSkillMentionAgents(w, req.SkillMentionAgents, "skill_mention_agents")
+	if !ok {
 		return
 	}
 
@@ -2846,6 +2866,20 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	// Determine creator identity: agent (via X-Agent-ID header) or member.
 	creatorType, actualCreatorID := h.resolveActor(r, creatorID, workspaceID)
 
+	// Gate the description's @skill designations BEFORE the create (R15):
+	// every pair must resolve in this workspace (skill + agent), the skill
+	// chip must appear in the submitted description (content coupling), and
+	// the designated agent must be invocable by the creator, unarchived, and
+	// runtime-bound — the comment path's gate set, with the creator as actor.
+	// Gate-failed agents are never bound or enqueued; they collect a blocked
+	// outcome and never abort the create or the other designations.
+	var descriptionText string
+	if req.Description != nil {
+		descriptionText = *req.Description
+	}
+	originatorUserID := h.invokeOriginatorFromRequest(r, creatorType, actualCreatorID)
+	skillDesignations, designationBlocked := h.gateIssueSkillDesignations(r.Context(), wsUUID, descriptionText, skillMentionAgents, creatorType, actualCreatorID, originatorUserID)
+
 	// Optional origin stamping (quick-create / autopilot). Only the
 	// allowed origin types are accepted; anything else is rejected so a
 	// rogue caller can't mint arbitrary origin labels. Both fields must
@@ -2949,6 +2983,9 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		AttachmentIDs:  attachmentIDs,
 		LabelIDs:       labelIDs,
 		AllowDuplicate: req.AllowDuplicate,
+		// Gate-admitted @skill designations, bound to their agents inside the
+		// create transaction (R6) so the first run already carries the skill.
+		SkillDesignations: skillDesignations,
 	}, service.IssueCreateOpts{
 		ActorID:          actualCreatorID,
 		AnalyticsAgentID: analyticsAgentID,
@@ -3009,6 +3046,14 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	issue := res.Issue
 	slog.Info("issue created", append(logger.RequestAttrs(r), "issue_id", uuidToString(issue.ID), "title", issue.Title, "status", issue.Status, "workspace_id", workspaceID)...)
 
+	// Post-create designation split (KTD3/KTD4): merge into the create's
+	// natural run when the designation targets the assignee agent (or the
+	// squad assignee's leader), suppress the enqueue in backlog (R8), and
+	// otherwise enqueue the designated agent directly with the creating
+	// member as the accountable human. The per-agent outcomes ride the
+	// response so bind-only and gate-blocked results are visible (R16).
+	designationOutcomes := h.applyCreateIssueSkillDesignations(r.Context(), issue, res.AssignedTaskID, skillDesignations, creatorType, actualCreatorID, designationBlocked)
+
 	resp := issueToResponse(issue, prefix)
 	fillCreated(&resp)
 	resp.Attachments = buildAttachmentResponses(res.Attachments)
@@ -3017,7 +3062,186 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	// understood label_ids and skip its legacy post-create attach fallback.
 	labelResponses := labelsToResponse(res.Labels)
 	resp.Labels = &labelResponses
+	resp.SkillDesignationOutcomes = designationOutcomes
 	writeJSON(w, http.StatusCreated, resp)
+}
+
+// gateIssueSkillDesignations resolves the skill_mention_agents designation map
+// against the request workspace BEFORE the issue create/update call, so a
+// designation that fails a gate never reaches the durable bind (R15). It
+// mirrors the comment path's bindAndEnqueueSkillMentions gate set:
+//
+//   - the designation is honored only when its @skill chip actually appears in
+//     the submitted description (content coupling — a chip-less designation
+//     entry is dropped silently, never bound);
+//   - the skill must resolve in this workspace (unknown / cross-workspace keys
+//     are dropped silently so a bogus id never leaks target existence);
+//   - each designated agent must resolve in this workspace (not-found and
+//     cross-workspace both surface as invocation_not_allowed — enumeration-safe),
+//     be invocable by the actor (canInvokeAgent), unarchived, and runtime-bound.
+//
+// A gate-failed agent is never bound or enqueued; it collects a blocked
+// outcome and never aborts the other designations. Returns the admitted
+// skill→agents map (ready for the in-transaction bind) and the blocked
+// outcomes (merged into the response after the write).
+func (h *Handler) gateIssueSkillDesignations(ctx context.Context, wsUUID pgtype.UUID, description string, skillMentionAgents map[string][]pgtype.UUID, actorType, actorID, originatorUserID string) (map[pgtype.UUID][]pgtype.UUID, []IssueSkillDesignationOutcome) {
+	if len(skillMentionAgents) == 0 {
+		return nil, nil
+	}
+	wsID := uuidToString(wsUUID)
+	var admitted map[pgtype.UUID][]pgtype.UUID
+	var blocked []IssueSkillDesignationOutcome
+	blockedSeen := make(map[string]struct{})
+	addBlocked := func(agentID pgtype.UUID, reason DispatchReasonCode) {
+		key := uuidToString(agentID)
+		if _, ok := blockedSeen[key]; ok {
+			return
+		}
+		blockedSeen[key] = struct{}{}
+		blocked = append(blocked, IssueSkillDesignationOutcome{TargetType: "agent", TargetID: key, Status: DispatchBlocked, ReasonCode: reason})
+	}
+
+	for _, m := range util.ParseMentions(description) {
+		if m.Type != "skill" || m.ID == "all" {
+			continue
+		}
+		designated := skillMentionAgents[m.ID]
+		if len(designated) == 0 {
+			// No designation for this mention: silent no-op (R12).
+			continue
+		}
+		// m.ID is request-controlled content (the mention regex admits any
+		// hex+'-' run), so use the safe parse and skip defensively — a
+		// malformed skill id carrying a designation must never 500 or leak.
+		skillUUID, err := util.ParseUUID(m.ID)
+		if err != nil {
+			continue
+		}
+		if _, err := h.Queries.GetSkillInWorkspace(ctx, db.GetSkillInWorkspaceParams{
+			ID:          skillUUID,
+			WorkspaceID: wsUUID,
+		}); err != nil {
+			// Unknown / cross-workspace skill: drop every designation silently.
+			continue
+		}
+		for _, agentID := range designated {
+			if !agentID.Valid {
+				continue
+			}
+			agent, err := h.Queries.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{
+				ID:          agentID,
+				WorkspaceID: wsUUID,
+			})
+			if err != nil {
+				// Enumeration-safe: not-found and cross-workspace look identical.
+				addBlocked(agentID, ReasonInvocationNotAllowed)
+				continue
+			}
+			// Private-agent gate first, before any archived/runtime state is read.
+			if !h.canInvokeAgent(ctx, agent, actorType, actorID, originatorUserID, wsID) {
+				addBlocked(agentID, ReasonInvocationNotAllowed)
+				continue
+			}
+			if agent.ArchivedAt.Valid {
+				addBlocked(agentID, ReasonTargetUnavailable)
+				continue
+			}
+			if !agent.RuntimeID.Valid {
+				addBlocked(agentID, ReasonRuntimeOffline)
+				continue
+			}
+			if admitted == nil {
+				admitted = make(map[pgtype.UUID][]pgtype.UUID)
+			}
+			admitted[skillUUID] = append(admitted[skillUUID], agentID)
+		}
+	}
+	return admitted, blocked
+}
+
+// applyCreateIssueSkillDesignations runs the post-create half of the
+// create-path designation flow (KTD3/KTD4), once per gate-admitted agent
+// (an agent designated for several chips gets one run carrying all of them —
+// the binds already landed in the create transaction):
+//
+//   - designation targets the assignee agent and the create's natural enqueue
+//     produced a task (AssignedTaskID) → merged: the run already carries the
+//     skill, no second enqueue (R7);
+//   - the issue is in backlog → bound: bind-only, enqueue suppressed (R8);
+//   - an (issue, agent) task is already pending — the natural squad-leader run
+//     (squad equivalence, review M3: the leader counts as the assignee) or a
+//     concurrent duplicate — → merged, never a second enqueue or an error;
+//   - otherwise → enqueue directly via EnqueueTaskForMentionWithActor with the
+//     creating member as the accountable human (no trigger comment exists).
+//
+// The blocked outcomes from the pre-create gate are folded in so the response
+// carries one outcome per designated agent.
+func (h *Handler) applyCreateIssueSkillDesignations(ctx context.Context, issue db.Issue, assignedTaskID pgtype.UUID, designations map[pgtype.UUID][]pgtype.UUID, actorType, actorID string, blocked []IssueSkillDesignationOutcome) []IssueSkillDesignationOutcome {
+	outcomes := blocked
+	if len(designations) == 0 {
+		return outcomes
+	}
+
+	// Distinct admitted agents, in first-seen order. The per-skill binds are
+	// already durable; this pass only decides each agent's run outcome.
+	agentIDs := make(map[string]pgtype.UUID)
+	var order []string
+	for _, agents := range designations {
+		for _, agentID := range agents {
+			key := uuidToString(agentID)
+			if _, ok := agentIDs[key]; ok {
+				continue
+			}
+			agentIDs[key] = agentID
+			order = append(order, key)
+		}
+	}
+
+	isBacklog := issuestatus.Effective(ctx, h.Queries, issue.WorkspaceID, issue.Status) == "backlog"
+
+	for _, key := range order {
+		agentID := agentIDs[key]
+		merged := func() {
+			outcomes = append(outcomes, IssueSkillDesignationOutcome{TargetType: "agent", TargetID: key, Status: DispatchMerged, ReasonCode: ReasonCoalesced})
+		}
+
+		// KTD3 merge: the designation targets the assignee agent whose natural
+		// run the create already enqueued.
+		if issue.AssigneeType.Valid && issue.AssigneeType.String == "agent" &&
+			issue.AssigneeID == agentID && assignedTaskID.Valid {
+			merged()
+			continue
+		}
+		// R8: backlog parks every designation run; the bind stands.
+		if isBacklog {
+			outcomes = append(outcomes, IssueSkillDesignationOutcome{TargetType: "agent", TargetID: key, Status: DispatchBound, ReasonCode: ReasonDeferred})
+			continue
+		}
+		// Pending guard (review M3): an already-pending (issue, agent) task —
+		// the natural squad-leader run when the squad assignee's leader is the
+		// designated agent, or a concurrent duplicate — absorbs this trigger.
+		hasPending, err := h.hasPendingTaskForIssueAndAgent(ctx, issue.ID, agentID, commentTriggerComputeOptions{})
+		if err != nil {
+			outcomes = append(outcomes, IssueSkillDesignationOutcome{TargetType: "agent", TargetID: key, Status: DispatchBlocked, ReasonCode: ReasonInternalError})
+			continue
+		}
+		if hasPending {
+			merged()
+			continue
+		}
+		if _, err := h.TaskService.EnqueueTaskForMentionWithActor(ctx, issue, agentID, memberActorUserID(actorType, actorID)); err != nil {
+			// A sibling task won the insert race between the pending check and
+			// the enqueue: the agent is covered — merged, never an error.
+			if errors.Is(err, service.ErrDuplicatePendingTask) {
+				merged()
+				continue
+			}
+			outcomes = append(outcomes, IssueSkillDesignationOutcome{TargetType: "agent", TargetID: key, Status: DispatchBlocked, ReasonCode: commentEnqueueFailureReason(err)})
+			continue
+		}
+		outcomes = append(outcomes, IssueSkillDesignationOutcome{TargetType: "agent", TargetID: key, Status: DispatchQueued, ReasonCode: ReasonQueued})
+	}
+	return outcomes
 }
 
 type UpdateIssueRequest struct {
