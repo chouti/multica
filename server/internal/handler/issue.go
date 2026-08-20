@@ -2706,6 +2706,14 @@ type CreateIssueRequest struct {
 	OriginID   *string `json:"origin_id,omitempty"`
 
 	AllowDuplicate bool `json:"allow_duplicate,omitempty"`
+	// SkillMentionAgents maps each @skill mention in the new issue description
+	// (keyed by the skill mention ID serialized in the mention://skill/<id>
+	// link) to the agent IDs the user explicitly designated to handle that
+	// skill. Mirrors the create-comment contract. An absent field or empty map
+	// carries no designation and changes nothing; a malformed agent UUID or a
+	// cap violation (per-skill 8 / map 16) is rejected with 400 at the boundary
+	// via parseSkillMentionAgents.
+	SkillMentionAgents map[string][]string `json:"skill_mention_agents,omitempty"`
 }
 
 func duplicateIssueMessage(issue IssueResponse) string {
@@ -2721,6 +2729,16 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 
 	if req.Title == "" {
 		writeError(w, http.StatusBadRequest, "title is required")
+		return
+	}
+
+	// Validate the skill_mention_agents designation map shape at the boundary
+	// (malformed agent UUID / per-skill or map cap → 400 before any write).
+	// TODO(plan U2): the parsed map is intentionally discarded here until the
+	// create-path designation wiring (in-transaction binding + post-create
+	// enqueue) consumes it. Until then an absent or well-formed field is a
+	// no-op with zero behavior change.
+	if _, ok := parseSkillMentionAgents(w, req.SkillMentionAgents, "skill_mention_agents"); !ok {
 		return
 	}
 
@@ -3037,6 +3055,14 @@ type UpdateIssueRequest struct {
 	// MUL-3375). Only consumed when a run actually starts: SuppressRun=true or
 	// a parked/non-triggering write drops it. Never fabricates a comment.
 	HandoffNote string `json:"handoff_note,omitempty"`
+	// SkillMentionAgents maps each @skill mention in the edited description
+	// (keyed by the skill mention ID serialized in the mention://skill/<id>
+	// link) to the agent IDs the user explicitly designated to handle that
+	// skill. Mirrors the update-comment contract. An absent field or empty map
+	// carries no designation and changes nothing; a malformed agent UUID or a
+	// cap violation (per-skill 8 / map 16) is rejected with 400 at the boundary
+	// via parseSkillMentionAgents.
+	SkillMentionAgents map[string][]string `json:"skill_mention_agents,omitempty"`
 }
 
 func mergeIssueChannelMediaDescription(current, incoming string, base *string, attachments []db.Attachment) string {
@@ -3197,6 +3223,16 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	// Track which fields were explicitly present in JSON (even if null)
 	var rawFields map[string]json.RawMessage
 	json.Unmarshal(bodyBytes, &rawFields)
+
+	// Validate the skill_mention_agents designation map shape at the boundary
+	// (malformed agent UUID / per-skill or map cap → 400 before any write).
+	// TODO(plan U3): the parsed map is intentionally discarded here until the
+	// edit-path designation wiring (gated bind + trigger fan-out) consumes it.
+	// Until then an absent or well-formed field is a no-op with zero behavior
+	// change.
+	if _, ok := parseSkillMentionAgents(w, req.SkillMentionAgents, "skill_mention_agents"); !ok {
+		return
+	}
 
 	// Pre-fill nullable fields (bare sqlc.narg) with current values
 	params := db.UpdateIssueParams{
