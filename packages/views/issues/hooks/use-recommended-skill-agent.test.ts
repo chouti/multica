@@ -10,12 +10,14 @@ import { useRecommendedSkillAgent } from "./use-recommended-skill-agent";
 vi.mock("@multica/core/api", () => ({
   api: {
     listAgents: vi.fn(),
+    listSquads: vi.fn(),
     getIssue: vi.fn(),
     listTimeline: vi.fn(),
   },
 }));
 
 const listAgents = vi.mocked(api.listAgents);
+const listSquads = vi.mocked(api.listSquads);
 const getIssue = vi.mocked(api.getIssue);
 const listTimeline = vi.mocked(api.listTimeline);
 
@@ -103,6 +105,8 @@ describe("useRecommendedSkillAgent", () => {
         { ...eligible(unboundAgentId), runtime_id: "", runtime_bound: false },
       ] as any),
     );
+    // Default: empty squads list. Squad-resolution tests override per-case.
+    listSquads.mockResolvedValue([]);
     listTimeline.mockResolvedValue(parentTimeline as any);
     getIssue.mockResolvedValue({
       assignee_type: "agent",
@@ -250,6 +254,153 @@ describe("useRecommendedSkillAgent", () => {
 
     await vi.waitFor(() => {
       expect(result.current).toEqual({ id: parentAgentId, tier: 1, from: "fast-path" });
+    });
+  });
+
+  // U5 — description-editor fast path. The description editors (create modal
+  // manual panel, issue edit state) carry no backend preview, so the
+  // recommendation collapses to the fast path: descriptionMentions →
+  // thread_parent → issue_assignee. The create path also takes a form
+  // assignee in place of the issue query lookup, and squad assignees resolve
+  // to their leader.
+  describe("description-editor fast path (U5)", () => {
+    it("ranks a description mention_agent above the issue assignee", async () => {
+      const { result } = renderRecommended({
+        issueId: "issue-1",
+        descriptionMentions: [
+          { id: mentionedAgentId, source: "mention_agent" },
+        ],
+      });
+
+      await vi.waitFor(() => {
+        // Tier 0 (mention_agent) beats tier 3 (issue_assignee).
+        expect(result.current).toEqual({
+          id: mentionedAgentId,
+          tier: 0,
+          from: "fast-path",
+        });
+      });
+    });
+
+    it("uses formAssignee when no issueId is supplied (create-issue path)", async () => {
+      const { result } = renderHook(
+        () =>
+          useRecommendedSkillAgent({
+            wsId: "ws-1",
+            // No issueId — create modal hasn't submitted yet.
+            // No preview either — description editors fall straight through
+            // to the fast path; the comment composer wires an explicit
+            // preview through `useCommentTriggerPreview`.
+            formAssignee: { type: "agent", id: assigneeAgentId },
+          }),
+        { wrapper: createWrapper() },
+      );
+
+      await vi.waitFor(() => {
+        expect(result.current).toEqual({
+          id: assigneeAgentId,
+          tier: 3,
+          from: "fast-path",
+        });
+      });
+    });
+
+    it("resolves a squad formAssignee to its leader", async () => {
+      listSquads.mockResolvedValue([
+        {
+          id: "squad-1",
+          workspace_id: "ws-1",
+          name: "Reviewers",
+          description: "",
+          instructions: "",
+          avatar_url: null,
+          leader_id: assigneeAgentId,
+          creator_id: "user-1",
+          created_at: "2026-01-01T00:00:00Z",
+          updated_at: "2026-01-01T00:00:00Z",
+          archived_at: null,
+          archived_by: null,
+        },
+      ] as any);
+
+      const { result } = renderHook(
+        () =>
+          useRecommendedSkillAgent({
+            wsId: "ws-1",
+            formAssignee: { type: "squad", id: "squad-1" },
+          }),
+        { wrapper: createWrapper() },
+      );
+
+      await vi.waitFor(() => {
+        // Squad → leader resolves to the agent that owns issue_assignee.
+        expect(result.current).toEqual({
+          id: assigneeAgentId,
+          tier: 3,
+          from: "fast-path",
+        });
+      });
+    });
+
+    it("treats an unresolved mention_agent as tier 0 even when assignee is set", async () => {
+      // A new @agent mention in the description (tier 0) must beat the issue
+      // assignee (tier 3) per R2's mention > assignee priority, even on the
+      // edit-state path where the assignee is loaded synchronously.
+      const { result } = renderRecommended({
+        issueId: "issue-1",
+        descriptionMentions: [
+          { id: mentionedAgentId, source: "mention_agent" },
+          { id: assigneeAgentId, source: "mention_agent" },
+        ],
+      });
+
+      await vi.waitFor(() => {
+        expect(result.current).toEqual({
+          id: mentionedAgentId,
+          tier: 0,
+          from: "fast-path",
+        });
+      });
+    });
+
+    it("skips description mentions that fail the visibility check", async () => {
+      // The archived agent is in descriptionMentions but not in
+      // eligibleAgentIds (unarchived + runtime-bound) — the recommendation
+      // drops it and falls through to the assignee.
+      const { result } = renderRecommended({
+        issueId: "issue-1",
+        descriptionMentions: [
+          { id: archivedAgentId, source: "mention_agent" },
+        ],
+      });
+
+      await vi.waitFor(() => {
+        expect(result.current).toEqual({
+          id: assigneeAgentId,
+          tier: 3,
+          from: "fast-path",
+        });
+      });
+    });
+
+    it("skips suppressed description mentions in favor of the assignee", async () => {
+      // Per KTD5, suppressed ids never recommend — even when the user typed
+      // the @agent mention in the description body, the suppress gesture wins.
+      const { result } = renderRecommended({
+        issueId: "issue-1",
+        descriptionMentions: [
+          { id: mentionedAgentId, source: "mention_agent" },
+        ],
+        suppressedAgentIds: new Set([mentionedAgentId]),
+      });
+
+      await vi.waitFor(() => {
+        expect(result.current).toEqual({
+          id: assigneeAgentId,
+          tier: 3,
+          from: "fast-path",
+        });
+      });
     });
   });
 });

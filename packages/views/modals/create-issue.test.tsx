@@ -47,7 +47,13 @@ const mockToastError = vi.hoisted(() => vi.fn());
 // Bindable-agent fixture for useSkillMentionAutoOpen (U4): the auto-open gate
 // reads the agent list query; one unarchived agent makes it settle non-empty.
 const mockAgentList = vi.hoisted(() => ({
-  agents: [] as Array<{ id: string; name: string; archived_at: string | null }>,
+  agents: [] as Array<{
+    id: string;
+    name: string;
+    archived_at: string | null;
+    runtime_id: string;
+    runtime_bound: boolean;
+  }>,
 }));
 // Uploads flow through the module-level coordinator, which calls
 // `api.uploadFile(file, ctx, signal)` (MUL-5181 L2). Tests drive uploads by
@@ -177,6 +183,16 @@ vi.mock("@multica/core/issues/queries", () => ({
   }),
   childIssuesOptions: (wsId: string, id: string) => ({
     queryKey: ["issues", wsId, "children", id],
+    queryFn: () => Promise.resolve([]),
+  }),
+  // U5: useRecommendedSkillAgent's reply-parent fast path (and the
+  // description-engine's mention fallback) consults the issue timeline. The
+  // create modal has no issueId, so the query is disabled and the function
+  // is never actually called — but vi.mock requires the export to exist for
+  // the hook to import it. Return an inert empty list so any accidental
+  // enable does not leak fixtures into other tests.
+  issueTimelineOptions: () => ({
+    queryKey: ["issues", "timeline"],
     queryFn: () => Promise.resolve([]),
   }),
 }));
@@ -379,13 +395,18 @@ vi.mock("../editor", async () => {
               {JSON.stringify(skillMentionContext.skillMentionAgents)}
             </span>
             {/* Typed @-menu selection: the suggestion command inserted the
-                chip and notified the composer. */}
+                chip and notified the composer. The real editor also fires
+                its debounced `onUpdate` from the same Tiptap transaction
+                (syncSkillMentionsWithDoc rides that tick in create-issue),
+                so the mock calls both to keep the auto-bind engine in
+                step with production. */}
             <button
               type="button"
               data-testid="desc-menu-insert-skill"
               onClick={() => {
                 skillMentionIdsRef.current = ["skill-1"];
                 onSkillMentionInserted?.("skill-1");
+                onUpdate?.(valueRef.current);
               }}
             >
               Insert skill via menu
@@ -1091,7 +1112,7 @@ describe("CreateIssueModal", () => {
   // skill designation, so the dead affordance must not cross the switch).
   describe("skill mention designation context (U4)", () => {
     beforeEach(() => {
-      mockAgentList.agents = [{ id: "agent-1", name: "Agent One", archived_at: null }];
+      mockAgentList.agents = [{ id: "agent-1", name: "Agent One", archived_at: null, runtime_id: "runtime-1", runtime_bound: true }];
     });
 
     it("exposes the designation context on the manual description editor and registers a typed skill chip", async () => {
@@ -1183,6 +1204,107 @@ describe("CreateIssueModal", () => {
       expect(mockSetAgent).toHaveBeenCalledWith({
         prompt: "Hand off\n\nLoop in [@Alice](mention://member/user-9) and run @code-review",
       });
+    });
+  });
+
+  // U5: description-editor auto-fill. The create modal manual panel has no
+  // backend trigger preview (descriptions don't have one), so the
+  // recommendation collapses to the fast path: description mentions
+  // (`@agent` / `@squad`) beat the form assignee. The fill effect writes
+  // resolved recommendations into the composer-held designation map, so a
+  // typed `@skill` chip auto-picks the right agent without the user touching
+  // the popover.
+  describe("skill mention auto-fill on the manual description editor (U5)", () => {
+    const u5AgentOneId = "00000000-0000-0000-0000-00000000000a";
+    const u5AgentTwoId = "00000000-0000-0000-0000-00000000000b";
+    beforeEach(() => {
+      // Two eligible agents so mention > assignee can be observed.
+      // `runtime_id`/`runtime_bound` matter: useRecommendedSkillAgent filters
+      // ineligible agents out (no runtime binding → no auto-recommendation),
+      // mirroring the recommendation-side visibility rule the picker uses
+      // for the auto-fill gate.
+      mockAgentList.agents = [
+        { id: u5AgentOneId, name: "Agent One", archived_at: null, runtime_id: "runtime-1", runtime_bound: true },
+        { id: u5AgentTwoId, name: "Agent Two", archived_at: null, runtime_id: "runtime-1", runtime_bound: true },
+      ];
+    });
+
+    it("auto-fills the form assignee when a chip is typed without a description mention", async () => {
+      // Seed the form assignee to agent-1 via the draft mock; the create
+      // modal reads `draft.manual.assigneeType`/`assigneeId` on mount.
+      mockDraftStore.draft.manual.assigneeType = "agent";
+      mockDraftStore.draft.manual.assigneeId = u5AgentOneId;
+
+      renderModal(<CreateIssueModal onClose={vi.fn()} />);
+      await screen.findByTestId("desc-skill-panel");
+
+      // The agent list query has to settle before the recommendation
+      // engine has any eligible id to recommend. Let microtasks drain so
+      // `recommended.id` is non-null by the time the fill effect sees the
+      // inserted chip.
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      fireEvent.click(screen.getByTestId("desc-menu-insert-skill"));
+
+      // The fill effect writes the recommendation into the designation map
+      // (issue_assignee → agent-1). Touched stays empty.
+      await waitFor(() => {
+        expect(screen.getByTestId("desc-skill-designations")).toHaveTextContent(
+          `{"skill-1":["${u5AgentOneId}"]}`,
+        );
+      });
+    });
+
+    it("prefers a description @agent mention over the form assignee (mention > assignee)", async () => {
+      mockDraftStore.draft.manual.assigneeType = "agent";
+      mockDraftStore.draft.manual.assigneeId = u5AgentOneId;
+
+      renderModal(<CreateIssueModal onClose={vi.fn()} />);
+      await screen.findByTestId("desc-skill-panel");
+
+      // Type the description first: agent-2 is mentioned in the body.
+      // Mention ids must be valid UUIDs (parseMentions regex requires hex);
+      // the picker key only cares about identity, so any well-formed UUID works.
+      fireEvent.change(screen.getByPlaceholderText("Add description..."), {
+        target: {
+          value: `Need [@Agent Two](mention://agent/${u5AgentTwoId}) to take this`,
+        },
+      });
+
+      // Then insert the @skill chip via the menu path.
+      fireEvent.click(screen.getByTestId("desc-menu-insert-skill"));
+
+      // Tier-0 mention_agent beats tier-3 issue_assignee per R2.
+      await waitFor(() => {
+        expect(screen.getByTestId("desc-skill-designations")).toHaveTextContent(
+          `{"skill-1":["${u5AgentTwoId}"]}`,
+        );
+      });
+    });
+
+    it("does not fill a pasted (non-typed) chip — paste path skips the suggestion command", async () => {
+      mockDraftStore.draft.manual.assigneeType = "agent";
+      mockDraftStore.draft.manual.assigneeId = u5AgentOneId;
+
+      renderModal(<CreateIssueModal onClose={vi.fn()} />);
+      await screen.findByTestId("desc-skill-panel");
+
+      // Paste skill markup into the textarea — the mock editor doesn't
+      // fire onSkillMentionInserted (KTD3: only the suggestion command
+      // path triggers the typed-insert signal), so the chip is in the doc
+      // but never registers in the insertedRef and the fill effect skips it.
+      fireEvent.change(screen.getByPlaceholderText("Add description..."), {
+        target: {
+          value: "Pasted [@code-review](mention://skill/00000000-0000-0000-0000-00000000000f) here",
+        },
+      });
+
+      // No designation in the composer-held map (per R5).
+      await act(async () => { await Promise.resolve(); });
+      expect(screen.getByTestId("desc-skill-designations")).toHaveTextContent("{}");
     });
   });
 

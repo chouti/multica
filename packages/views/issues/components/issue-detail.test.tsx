@@ -24,7 +24,13 @@ const contentEditorMounts = vi.hoisted(() => ({ count: 0 }));
 // editor's typed-insert auto-open gate reads the agent list query. Default
 // empty preserves pre-U4 behavior; the designation-context suite overrides it.
 const mockAgentsData = vi.hoisted(() => ({
-  value: [] as Array<{ id: string; name: string; archived_at: string | null }>,
+  value: [] as Array<{
+    id: string;
+    name: string;
+    archived_at: string | null;
+    runtime_id: string;
+    runtime_bound: boolean;
+  }>,
 }));
 // Stable empty-attachments reference: the real store returns a shared constant
 // so the `useCommentDraftStore(s => s.getAttachments(key))` selector keeps a
@@ -250,13 +256,18 @@ vi.mock("../../editor", async () => ({
               {JSON.stringify(skillMentionContext.skillMentionAgents)}
             </span>
             {/* Typed @-menu selection: the suggestion command inserted the
-                chip and notified the composer. */}
+                chip and notified the composer. The real editor also fires
+                its debounced `onUpdate` from the same Tiptap transaction
+                (syncSkillMentionsWithDoc rides that tick in issue-detail),
+                so the mock calls both to keep the auto-bind engine in step
+                with production. */}
             <button
               type="button"
               data-testid="desc-menu-insert-skill"
               onClick={() => {
                 skillMentionIdsRef.current = ["skill-1"];
                 onSkillMentionInserted?.("skill-1");
+                onUpdate?.(valueRef.current, baseRef.current);
               }}
             >
               Insert skill via menu
@@ -741,7 +752,7 @@ describe("IssueDetail (shared)", () => {
   // composer-held designation map.
   describe("description skill mention designation context (U4)", () => {
     beforeEach(() => {
-      mockAgentsData.value = [{ id: "agent-1", name: "Claude Agent", archived_at: null }];
+      mockAgentsData.value = [{ id: "agent-1", name: "Claude Agent", archived_at: null, runtime_id: "runtime-1", runtime_bound: true }];
     });
 
     it("exposes the designation context on the description editor and registers a typed skill chip", async () => {
@@ -789,6 +800,98 @@ describe("IssueDetail (shared)", () => {
         await new Promise((resolve) => setTimeout(resolve, 0));
       });
       expect(screen.getByTestId("desc-skill-popover-open-for")).toHaveTextContent("");
+    });
+  });
+
+  // U5: the edit-state description editor carries the auto-fill engine on top
+  // of the U4 designation context. The recommendation collapses to the fast
+  // path (no backend preview exists for descriptions): description mentions
+  // (`@agent`) beat the issue assignee. The fill effect writes resolved
+  // recommendations into the composer-held designation map.
+  describe("description skill mention auto-fill (U5)", () => {
+    const u5AgentOneId = "00000000-0000-0000-0000-00000000000a";
+    const u5AgentTwoId = "00000000-0000-0000-0000-00000000000b";
+    beforeEach(() => {
+      // Two eligible agents so mention > assignee can be observed.
+      // `runtime_id`/`runtime_bound` matter: useRecommendedSkillAgent filters
+      // ineligible agents out (no runtime binding → no auto-recommendation).
+      mockAgentsData.value = [
+        { id: u5AgentOneId, name: "Agent One", archived_at: null, runtime_id: "runtime-1", runtime_bound: true },
+        { id: u5AgentTwoId, name: "Agent Two", archived_at: null, runtime_id: "runtime-1", runtime_bound: true },
+      ];
+      // Default: agent-1 is the issue assignee.
+      mockApiObj.getIssue.mockResolvedValue({
+        ...mockIssue,
+        assignee_type: "agent",
+        assignee_id: u5AgentOneId,
+      });
+    });
+
+    it("auto-fills the issue assignee when a chip is typed without a description mention", async () => {
+      renderIssueDetail();
+      await screen.findByText("Implement authentication");
+      await screen.findByTestId("desc-skill-panel");
+
+      // Drain microtasks so the agent list query settles and the recommendation
+      // engine has an eligible id to recommend by the time the fill effect
+      // sees the inserted chip.
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      fireEvent.click(screen.getByTestId("desc-menu-insert-skill"));
+
+      // The fill effect writes the issue_assignee recommendation into the
+      // designation map (issue_assignee → agent-1). Touched stays empty.
+      await waitFor(() => {
+        expect(screen.getByTestId("desc-skill-designations")).toHaveTextContent(
+          `{"skill-1":["${u5AgentOneId}"]}`,
+        );
+      });
+    });
+
+    it("prefers a description @agent mention over the issue assignee (mention > assignee)", async () => {
+      renderIssueDetail();
+      await screen.findByText("Implement authentication");
+      await screen.findByTestId("desc-skill-panel");
+
+      // Type the description first: agent-2 is mentioned in the body.
+      // Mention ids must be valid UUIDs (parseMentions regex requires hex).
+      fireEvent.change(screen.getByTestId("rich-text-editor"), {
+        target: {
+          value: `Need [@Agent Two](mention://agent/${u5AgentTwoId}) to take this`,
+        },
+      });
+
+      // Then insert the @skill chip via the menu path.
+      fireEvent.click(screen.getByTestId("desc-menu-insert-skill"));
+
+      // Tier-0 mention_agent beats tier-3 issue_assignee per R2.
+      await waitFor(() => {
+        expect(screen.getByTestId("desc-skill-designations")).toHaveTextContent(
+          `{"skill-1":["${u5AgentTwoId}"]}`,
+        );
+      });
+    });
+
+    it("does not fill a pasted (non-typed) chip — paste path skips the suggestion command", async () => {
+      renderIssueDetail();
+      await screen.findByText("Implement authentication");
+      await screen.findByTestId("desc-skill-panel");
+
+      // Paste skill markup into the textarea — the mock editor doesn't
+      // fire onSkillMentionInserted (KTD3: only the suggestion command
+      // path triggers the typed-insert signal), so the chip is in the doc
+      // but never registers in the insertedRef and the fill effect skips it.
+      fireEvent.change(screen.getByTestId("rich-text-editor"), {
+        target: {
+          value: "Pasted [@code-review](mention://skill/00000000-0000-0000-0000-00000000000f) here",
+        },
+      });
+
+      await act(async () => { await Promise.resolve(); });
+      expect(screen.getByTestId("desc-skill-designations")).toHaveTextContent("{}");
     });
   });
 

@@ -38,21 +38,19 @@
  *   lifecycle.
  */
 
-import {
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-  type Dispatch,
-  type RefObject,
-  type SetStateAction,
-} from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type RefObject, type SetStateAction } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { sameStringList } from "@multica/core/utils";
+import { parseMentions } from "@multica/core/issues/comment-trigger-outcomes";
+import { agentListOptions } from "@multica/core/workspace/queries";
 import type { ContentEditorRef } from "../../editor/content-editor";
 import { useT } from "../../i18n";
 import { isNoteCommentDraft } from "./use-comment-trigger-preview";
 import type { UseCommentTriggerPreviewResult } from "./use-comment-trigger-preview";
-import { useRecommendedSkillAgent } from "./use-recommended-skill-agent";
+import {
+  useRecommendedSkillAgent,
+  type DescriptionMentionAgent,
+} from "./use-recommended-skill-agent";
 import { useSkillMentionAutoOpen } from "./use-skill-mention-auto-open";
 
 /** A fill that still holds its one-shot async upgrade window. `tier` is the
@@ -64,12 +62,19 @@ interface PendingFill {
 
 export interface UseSkillAutoBindParams {
   wsId: string;
-  issueId: string;
+  /** Comment composers always have an issueId. Description-editor consumers
+   *  (create modal manual panel before submit, issue edit state) may omit
+   *  it: the recommendation engine falls back to `descriptionMentions` +
+   *  `formAssignee` / `issue.assignee` when no issueId is available. */
+  issueId?: string;
   /** Reply composers pass their parent comment id (thread-parent fast path). */
   parentId?: string;
   /** The composer's own trigger-preview result — see
-   *  useRecommendedSkillAgent's `preview` param for why it is injected. */
-  triggerPreview: Pick<UseCommentTriggerPreviewResult, "backendAgents" | "resolved">;
+   *  useRecommendedSkillAgent's `preview` param for why it is injected.
+   *  Description-editor consumers pass a synthetic empty+resolved preview
+   *  so the async branch yields null and the recommendation collapses to
+   *  fast-path only (no backend preview exists for descriptions). */
+  triggerPreview?: Pick<UseCommentTriggerPreviewResult, "backendAgents" | "resolved">;
   /** Composer-held suppression set from the trigger chip strip. */
   suppressedAgentIds: ReadonlySet<string>;
   skillMentionAgents: Record<string, string[]>;
@@ -83,6 +88,17 @@ export interface UseSkillAutoBindParams {
    *  mount of the same draft. */
   initialTouchedSkillIds?: readonly string[];
   initialFilledSkillIds?: readonly string[];
+  /** Description-editor body. When provided, the recommendation engine parses
+   *  the body's `@agent` and `@squad` mentions and ranks them at tier 0
+   *  (mention_agent / mention_squad_leader), beating the assignee source.
+   *  Comment composers leave this unset — their mention signal arrives via
+   *  the backend preview's `backendAgents`. */
+  description?: string;
+  /** Create-issue form assignee. Description-editor consumer that has no
+   *  issueId yet uses this in place of `issue.assignee_type` / `assignee_id`.
+   *  Squad types resolve to their leader via the squads query, mirroring the
+   *  comment composer's "treat squad leader as assignee" rule. */
+  formAssignee?: { type: string; id: string | undefined };
 }
 
 export interface UseSkillAutoBindResult {
@@ -123,8 +139,26 @@ export function useSkillAutoBind({
   setOpenPopoverFor,
   initialTouchedSkillIds,
   initialFilledSkillIds,
+  description,
+  formAssignee,
 }: UseSkillAutoBindParams): UseSkillAutoBindResult {
   const { t } = useT("issues");
+
+  // Description-editor mentions: parsed from `description` when provided.
+  // The caller is responsible for filtering to "newly inserted" mentions per
+  // R2 — this hook ranks whatever it receives.
+  const descriptionMentions = useMemo<readonly DescriptionMentionAgent[]>(() => {
+    if (!description) return [];
+    const out: DescriptionMentionAgent[] = [];
+    for (const mention of parseMentions(description)) {
+      if (mention.type === "agent") {
+        out.push({ id: mention.id, source: "mention_agent" });
+      } else if (mention.type === "squad") {
+        out.push({ id: mention.id, source: "mention_squad_leader" });
+      }
+    }
+    return out;
+  }, [description]);
 
   const recommended = useRecommendedSkillAgent({
     wsId,
@@ -132,6 +166,8 @@ export function useSkillAutoBind({
     parentId,
     preview: triggerPreview,
     suppressedAgentIds,
+    descriptionMentions,
+    formAssignee,
   });
   // Render-time mirror: the submit terminal fill must read the freshest
   // recommendation without waiting for a re-render (same-tick submits).
@@ -155,6 +191,11 @@ export function useSkillAutoBind({
   // fill is replaced/removed by the first authoritative answer; an async fill
   // is replaced only by a strictly higher-tier answer (review finding #4).
   const upgradableSkillIdsRef = useRef<Map<string, PendingFill>>(new Map());
+  // Session-freshness latch (U5): the effect below fires once per session
+  // (mount, or after `reset()`) — a chip hydrated with a pending designation
+  // re-pops the picker so the user can confirm or modify before submit.
+  // `reset()` clears the latch so an issue switch re-arms the scan.
+  const sessionFreshnessDoneRef = useRef(false);
   // Live `/note` gate (review finding #9): snapshotted from the document on
   // every sync tick so the fill effect re-runs when note-ness flips.
   const [noteDraft, setNoteDraft] = useState(false);
@@ -195,6 +236,40 @@ export function useSkillAutoBind({
     },
     [autoOpen],
   );
+
+  // Session-freshness scan (U5): once per session (mount or post-reset) —
+  // when the editor opens with chips already in the document carrying a
+  // pending designation (hydrate from draft, or a chips-from-server case the
+  // user has since touched via the popover), re-pop the picker so the user
+  // sees the current designation rather than discovering it on submit. The
+  // query is shared with useSkillMentionAutoOpen via TanStack's cache, so no
+  // extra request fires. Touched chips stay closed (KTD5 explicit-gesture
+  // rule) and typed-this-session chips defer to the typed-insert gate.
+  const { data: bindableAgents, isLoading: bindableAgentsLoading } = useQuery(
+    agentListOptions(wsId),
+  );
+  const hasBindableAgents = (bindableAgents ?? []).some(
+    (agent) => !agent.archived_at,
+  );
+  useEffect(() => {
+    if (sessionFreshnessDoneRef.current) return;
+    if (bindableAgentsLoading || !hasBindableAgents) return;
+    sessionFreshnessDoneRef.current = true;
+    const designationMap = skillMentionAgentsRef.current;
+    const inserted = insertedSkillIdsRef.current;
+    const touched = touchedRef.current;
+    for (const skillId of Object.keys(designationMap)) {
+      const agents = designationMap[skillId];
+      if (!agents || agents.length === 0) continue;
+      if (inserted.has(skillId)) continue;
+      if (touched.has(skillId)) continue;
+      if (isSkillPresent(skillId) === false) continue;
+      // Single-slot popover: don't trample an open slot. The freshest
+      // popover slot wins; the rest stay as one-shots on next mount/reset.
+      setOpenPopoverFor((prev) => (prev == null ? skillId : prev));
+      return;
+    }
+  }, [bindableAgentsLoading, hasBindableAgents, setOpenPopoverFor, isSkillPresent]);
 
   const handleSkillMentionChange = useCallback(
     (skillId: string, agentIds: string[]) => {
@@ -419,6 +494,7 @@ export function useSkillAutoBind({
     setFilledSkillIds(new Set());
     setDocSkillIds([]);
     setNoteDraft(false);
+    sessionFreshnessDoneRef.current = false;
   }, []);
 
   return {

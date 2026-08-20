@@ -72,7 +72,7 @@ import { CommentCard } from "./comment-card";
 import { CommentInput } from "./comment-input";
 import { formatProgressText } from "./child-progress";
 import { CurrentIssueRenderContextProvider } from "../current-issue-render-context";
-import { useSkillMentionAutoOpen } from "../hooks/use-skill-mention-auto-open";
+import { useSkillAutoBind } from "../hooks/use-skill-auto-bind";
 import { ResolvedThreadBar } from "./resolved-thread-bar";
 import { getShortcut, shortcutMatchesEvent } from "@multica/core/shortcuts";
 import { isImeComposing } from "@multica/core/utils";
@@ -1854,27 +1854,35 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   // engine wires on top in U5.
   const [skillMentionAgents, setSkillMentionAgents] = useState<Record<string, string[]>>({});
   const [openPopoverFor, setOpenPopoverFor] = useState<string | null>(null);
-  const handleSkillMentionChange = useCallback((skillId: string, agentIds: string[]) => {
-    setSkillMentionAgents((prev) => {
-      const next = { ...prev };
-      if (agentIds.length > 0) next[skillId] = agentIds;
-      else delete next[skillId];
-      return next;
-    });
-  }, []);
-  // Live chip-presence check for the auto-open in-flight tail: a typed
-  // insert whose chip was deleted before the agent list settled must drop
-  // its held auto-open request, mirroring the comment path's KTD3 rule.
-  const isSkillChipPresent = useCallback(
-    (skillId: string) =>
-      (descEditorRef.current?.getSkillMentionIds() ?? []).includes(skillId),
-    [],
-  );
-  const handleSkillMentionInserted = useSkillMentionAutoOpen(
+  // Live description mirror: the editor's `onUpdate` is debounced (1500ms in
+  // issue-detail) so `issue.description` lags behind the user's keystrokes by
+  // that window. The recommendation engine reads this mirror for mention
+  // parsing — a freshly-typed `@agent` chip's mention becomes visible to the
+  // engine as soon as the editor fires its next update tick (reverse-timing
+  // fill). On reset effects the mirror snaps back to the server-persisted
+  // value so issue A's typing never bleeds into issue B's session.
+  const [descDraft, setDescDraft] = useState<string>(issue?.description || "");
+  useEffect(() => {
+    setDescDraft(issue?.description || "");
+  }, [issue?.description]);
+  // Skill-mention auto-open + recommendation / auto-fill engine (U5): the
+  // recommendation engine reads `description` (description mentions → tier 0)
+  // and the issue assignee. Touched / sticky / paste-exclusion / reverse-
+  // timing fill all live inside the engine. The single popover slot, the
+  // session freshness scan, and the typed-insert auto-open gate (KTD3
+  // in-flight drop, KTD4 agent-list gate) are all owned by this hook.
+  const emptySuppressedRef = useRef<ReadonlySet<string>>(new Set());
+  const autoBind = useSkillAutoBind({
     wsId,
+    issueId: id,
+    description: descDraft,
+    suppressedAgentIds: emptySuppressedRef.current,
+    skillMentionAgents,
+    setSkillMentionAgents,
+    editorRef: descEditorRef,
     setOpenPopoverFor,
-    isSkillChipPresent,
-  );
+  });
+  const { handleSkillMentionInserted, handleSkillMentionChange, syncSkillMentionsWithDoc } = autoBind;
   // Per-issue reset: navigating issue→issue keeps this IssueDetail mounted
   // (the editor remounts via `key={id}`), so the composer-held designation
   // map and the popover slot must reset explicitly or issue A's chips would
@@ -1885,7 +1893,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     prevIssueIdRef.current = id;
     setSkillMentionAgents({});
     setOpenPopoverFor(null);
-  }, [id]);
+    autoBind.reset();
+  }, [id, autoBind.reset]);
   // Keep the description editor mounted from the start. Unlike the empty
   // composer shells, a long rendered description cannot swap between
   // react-markdown and ProseMirror without small per-block height differences
@@ -2772,6 +2781,17 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               value={issue.description || ""}
               placeholder={t(($) => $.detail.desc_placeholder)}
               onUpdate={(md, baseMarkdown) => {
+                // Mirror the debounced markdown into the live description
+                // state (U5) so the recommendation engine sees freshly-typed
+                // mentions on its next render. The autosave mutation below
+                // is the source of truth for the persisted value; this mirror
+                // closes the 1500ms gap between keystroke and round-trip.
+                setDescDraft(md);
+                // U5: the auto-bind engine syncs its `docSkillIds` view of
+                // the editor on every update tick so the fill effect sees
+                // chip insertions/removals immediately (and the popover
+                // slot reconcile clears a chip-orphan slot).
+                syncSkillMentionsWithDoc();
                 // Bind any pending uploads still referenced in the markdown
                 // so they appear in `issueAttachments` after refresh and the
                 // editor's text/code preview keeps working past reload.
@@ -2788,7 +2808,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 // whose origin isn't the API host (Desktop/Electron, mobile
                 // webview) — while still working on web via the cookie/proxy.
                 // This mirrors the comment/reply/chat composers, which already
-                // bind via `contentReferencesAttachment` (MUL-3130 / MUL-3192).
+                // bind via `contentReferencesAttachment` (MUL-3130 / MUL-3190).
                 const ids = descPendingAttachmentsRef.current
                   .filter((a) => contentReferencesAttachment(md, a))
                   .map((a) => a.id);

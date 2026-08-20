@@ -44,6 +44,8 @@ const RESET_STATE = {
       assigneeId: undefined,
       labelIds: [],
       propertyValues: {},
+      skillMentionTouched: [],
+      skillMentionFilled: [],
     },
     agent: {
       prompt: "",

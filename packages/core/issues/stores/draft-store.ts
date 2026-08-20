@@ -56,6 +56,15 @@ export interface IssueCreateManual {
    *  a plain id list rather than full Label objects. */
   labelIds: string[];
   propertyValues: IssuePropertyValues;
+  /** Skill chip ids the user touched (picker select/clear) in the create
+   *  dialog's description editor — survives a modal close so the auto-bind
+   *  engine doesn't re-fill on reopen. Persists with the draft; cleared by
+   *  `clearDraft`. */
+  skillMentionTouched: string[];
+  /** Skill chip ids the auto-bind engine already filled — same draft-survival
+   *  guarantee so a reopen never re-fills the same chip and the badge stays
+   *  exactly once. */
+  skillMentionFilled: string[];
 }
 
 export interface IssueCreateAgent {
@@ -87,6 +96,8 @@ const emptyManual = (): IssueCreateManual => ({
   assigneeId: undefined,
   labelIds: [],
   propertyValues: {},
+  skillMentionTouched: [],
+  skillMentionFilled: [],
 });
 
 const emptyAgent = (): IssueCreateAgent => ({

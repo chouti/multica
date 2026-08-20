@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect, useLayoutEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useLayoutEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { AppLink, resolveClickIntent, useNavigation } from "../navigation";
 import {
@@ -64,7 +64,7 @@ import { useIssueDraftStore, type IssueCreateDraft } from "@multica/core/issues/
 import { useCreateModeStore } from "@multica/core/issues/stores/create-mode-store";
 import { useQuickCreateStore } from "@multica/core/issues/stores/quick-create-store";
 import { stripSkillMentionMarkdown } from "../issues/utils/strip-mention-markdown";
-import { useSkillMentionAutoOpen } from "../issues/hooks/use-skill-mention-auto-open";
+import { useSkillAutoBind } from "../issues/hooks/use-skill-auto-bind";
 import {
   useIssueCreateSettingsStore,
   type ManualCreateField,
@@ -237,17 +237,11 @@ export function ManualCreatePanel({
   // composers — the manual chip-click picker works here, and typed skill
   // insertions register in the composer's single popover slot via the
   // existing useSkillMentionAutoOpen gate. The recommendation / auto-fill
-  // engine wires on top in U5.
+  // engine (U5) wires on top via useSkillAutoBind below, which internally
+  // owns its own auto-open gate and reads the live description + form
+  // assignee to compute the recommendation.
   const [skillMentionAgents, setSkillMentionAgents] = useState<Record<string, string[]>>({});
   const [openPopoverFor, setOpenPopoverFor] = useState<string | null>(null);
-  const handleSkillMentionChange = useCallback((skillId: string, agentIds: string[]) => {
-    setSkillMentionAgents((prev) => {
-      const next = { ...prev };
-      if (agentIds.length > 0) next[skillId] = agentIds;
-      else delete next[skillId];
-      return next;
-    });
-  }, []);
   const { isDragOver: descDragOver, dropZoneProps: descDropZoneProps } = useFileDropZone({
     onDrop: (files) => files.forEach((f) => descEditorRef.current?.uploadFile(f)),
   });
@@ -326,20 +320,43 @@ export function ManualCreatePanel({
     enabled: !!parentIssueId,
   });
 
-  // Skill-mention auto-open gate (U4, after wsId): a typed insert whose
-  // chip was deleted before the agent list settled must drop its held
-  // auto-open request, mirroring the comment path's KTD3 rule. The
-  // recommendation / auto-fill engine wires on top in U5.
-  const isSkillChipPresent = useCallback(
-    (skillId: string) =>
-      (descEditorRef.current?.getSkillMentionIds() ?? []).includes(skillId),
-    [],
+  // Skill-mention auto-open + recommendation / auto-fill engine (U5): the
+  // recommendation engine reads `description` (description mentions → tier 0)
+  // and `formAssignee` (the assignee source for the create path — no issueId
+  // exists yet). Touched / sticky / paste-exclusion / reverse-timing fill
+  // all live inside the engine. The single popover slot, the session
+  // freshness scan, and the typed-insert auto-open gate (KTD3 in-flight
+  // drop, KTD4 agent-list gate) are all owned by this hook.
+  //
+  // `descriptionMirror` is a local mirror of the editor's current markdown,
+  // updated via the editor's `onUpdate`. The persistent source of truth is
+  // the draft store (where U6 will persist it across modal reopens), but
+  // the draft-store selector doesn't drive a React re-render on every
+  // keystroke in the test harness — the local mirror closes that gap so the
+  // recommendation engine sees freshly-typed mentions on its next render.
+  const [descriptionMirror, setDescriptionMirror] = useState<string>(
+    () => draft.manual.description || "",
   );
-  const handleSkillMentionInserted = useSkillMentionAutoOpen(
+  // The create-issue modal has no trigger-chip strip, so suppression is
+  // always empty. Stable reference so the engine's effect deps stay quiet.
+  const emptySuppressedRef = useRef<ReadonlySet<string>>(new Set());
+  const autoBind = useSkillAutoBind({
     wsId,
+    description: descriptionMirror,
+    formAssignee: assigneeType ? { type: assigneeType, id: assigneeId } : undefined,
+    suppressedAgentIds: emptySuppressedRef.current,
+    skillMentionAgents,
+    setSkillMentionAgents,
+    editorRef: descEditorRef,
     setOpenPopoverFor,
-    isSkillChipPresent,
-  );
+    initialTouchedSkillIds: draft.manual.skillMentionTouched,
+    initialFilledSkillIds: draft.manual.skillMentionFilled,
+  });
+  const {
+    handleSkillMentionInserted,
+    handleSkillMentionChange,
+    syncSkillMentionsWithDoc,
+  } = autoBind;
 
   // Set the persisted draft's active mode so a later reopen (and any reader of
   // the unified draft) knows which form the user is editing in.
@@ -911,7 +928,18 @@ export function ManualCreatePanel({
                 ref={descEditorRef}
                 defaultValue={draft.manual.description}
                 placeholder={t(($) => $.create_issue.description_placeholder)}
-                onUpdate={(md) => setManual({ description: md })}
+                onUpdate={(md) => {
+                  setManual({ description: md });
+                  // Mirror the editor's markdown into local state (U5) so the
+                  // recommendation engine sees freshly-typed mentions on its
+                  // next render — the persisted draft store is the source of
+                  // truth, but the local mirror closes the live-update gap.
+                  setDescriptionMirror(md);
+                  // U5: the auto-bind engine syncs its `docSkillIds` view of
+                  // the editor on every update tick so the fill effect sees
+                  // chip insertions/removals immediately.
+                  syncSkillMentionsWithDoc();
+                }}
                 onSubmit={handleSubmit}
                 onUploadFile={handleUpload}
                 onUploadingChange={uploadGate.onUploadingChange}
