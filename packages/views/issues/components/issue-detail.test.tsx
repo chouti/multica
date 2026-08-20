@@ -280,6 +280,18 @@ vi.mock("../../editor", async () => ({
             >
               Designate agent-1
             </button>
+            {/* AE8 helper: close the popover slot so the parent can drive
+              // the AE8 popover-close effect. Real users dismiss the popover
+              // via Esc / outside-click / chip-click — this button stands in
+              // for those gestures so the mock can deterministically trigger
+              // AE8 without booting a Tiptap popover. */}
+            <button
+              type="button"
+              data-testid="desc-close-popover"
+              onClick={() => skillMentionContext.setOpenPopoverFor?.(null)}
+            >
+              Close popover
+            </button>
           </div>
         )}
       </>
@@ -1831,6 +1843,231 @@ describe("IssueDetail (shared)", () => {
           description_base: "Add JWT auth to the backend",
         }),
       );
+    });
+  });
+
+  // U6: edit-path submit pipeline. The description editor's autosave
+  // carries `skill_mention_agents` whenever the composer-held map has
+  // entries; success clears the map (KTD1 consumption). The AE8
+  // popover-close trigger fires a bare update with just the designation
+  // when no description change is in flight (R10). Both paths share
+  // consumption so a follow-up autosave does not re-send the same
+  // payload.
+  describe("description skill designation submit pipeline (U6)", () => {
+    // The mock `desc-designate-agent` button hardcodes "agent-1" as the
+    // designated agent id (see MockContentEditor). Tests in this suite
+    // reference that constant directly instead of an arbitrary UUID so
+    // the wire-payload assertions match the composer-held map.
+    const u6AgentId = "agent-1";
+
+    beforeEach(() => {
+      mockAgentsData.value = [
+        { id: u6AgentId, name: "Agent One", archived_at: null, runtime_id: "runtime-1", runtime_bound: true },
+      ];
+      mockApiObj.getIssue.mockResolvedValue({
+        ...mockIssue,
+        assignee_type: "agent",
+        assignee_id: u6AgentId,
+      });
+      // The hook's updateIssue call goes through this mock; reset between
+      // tests so per-test spies stay clean.
+      mockApiObj.updateIssue.mockReset();
+      // Default success body — includes the new field for parseWithFallback.
+      mockApiObj.updateIssue.mockResolvedValue({
+        ...mockIssue,
+        skill_designation_outcomes: [
+          { target_type: "agent", target_id: u6AgentId, status: "queued", reason_code: "queued" },
+        ],
+      });
+    });
+
+    it("forwards skill_mention_agents on the description autosave when the composer-held map has entries", async () => {
+      renderIssueDetail();
+      await screen.findByText("Implement authentication");
+      await screen.findByTestId("desc-skill-panel");
+
+      // Drain microtasks so the agent list settles, then insert via the
+      // @-menu (typed insertion, KTD3) and designate so the map has a row.
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      fireEvent.click(screen.getByTestId("desc-menu-insert-skill"));
+      fireEvent.click(screen.getByTestId("desc-designate-agent"));
+      await waitFor(() => {
+        expect(screen.getByTestId("desc-skill-designations")).toHaveTextContent(
+          `{"skill-1":["${u6AgentId}"]}`,
+        );
+      });
+
+      // Trigger an autosave by editing the description.
+      fireEvent.change(screen.getByTestId("rich-text-editor"), {
+        target: { value: "Use the reviewer." },
+      });
+
+      await waitFor(() => {
+        expect(mockApiObj.updateIssue).toHaveBeenCalledWith(
+          "issue-1",
+          expect.objectContaining({
+            description: "Use the reviewer.",
+            skill_mention_agents: { "skill-1": [u6AgentId] },
+          }),
+        );
+      });
+    });
+
+    it("omits skill_mention_agents on the autosave when the composer-held map is empty (R12)", async () => {
+      renderIssueDetail();
+      await screen.findByText("Implement authentication");
+
+      // No chip insertion, no designation → empty map → field must be
+      // omitted from the JSON body (server treats omitted as "no
+      // designation", R12).
+      fireEvent.change(screen.getByTestId("rich-text-editor"), {
+        target: { value: "Plain edit, no skill chip" },
+      });
+
+      await waitFor(() => {
+        expect(mockApiObj.updateIssue).toHaveBeenCalledWith(
+          "issue-1",
+          expect.anything(),
+        );
+      });
+      const call = mockApiObj.updateIssue.mock.calls.find(
+        (c) => (c[1] as Record<string, unknown> | undefined)?.description === "Plain edit, no skill chip",
+      );
+      expect(call).toBeDefined();
+      expect(JSON.stringify(call?.[1])).not.toContain("skill_mention_agents");
+    });
+
+    it("fires a touch-only update when the popover closes without a description change (AE8 / R10)", async () => {
+      renderIssueDetail();
+      await screen.findByText("Implement authentication");
+      await screen.findByTestId("desc-skill-panel");
+
+      // Drain + insert + designate without typing anything.
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      fireEvent.click(screen.getByTestId("desc-menu-insert-skill"));
+      // The menu-insert opened the popover (U3 auto-open); sanity-check.
+      await waitFor(() => {
+        expect(screen.getByTestId("desc-skill-popover-open-for")).toHaveTextContent("skill-1");
+      });
+      fireEvent.click(screen.getByTestId("desc-designate-agent"));
+      await waitFor(() => {
+        expect(screen.getByTestId("desc-skill-designations")).toHaveTextContent(
+          `{"skill-1":["${u6AgentId}"]}`,
+        );
+      });
+      // Close the popover WITHOUT typing. The AE8 popover-close effect in
+      // issue-detail must fire a bare update carrying just the designation.
+      fireEvent.click(screen.getByTestId("desc-close-popover"));
+
+      await waitFor(
+        () => {
+          const calls = mockApiObj.updateIssue.mock.calls.filter((c) => {
+            const body = c[1] as Record<string, unknown> | undefined;
+            return body?.skill_mention_agents !== undefined;
+          });
+          expect(calls.length).toBeGreaterThan(0);
+          const lastCall = calls[calls.length - 1];
+          const body = lastCall?.[1] as Record<string, unknown> | undefined;
+          expect(body?.skill_mention_agents).toEqual({ "skill-1": [u6AgentId] });
+        },
+        { timeout: 3000 },
+      );
+    });
+
+    it("clears the composer-held map after a successful autosave (KTD1 consumption)", async () => {
+      renderIssueDetail();
+      await screen.findByText("Implement authentication");
+      await screen.findByTestId("desc-skill-panel");
+
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      fireEvent.click(screen.getByTestId("desc-menu-insert-skill"));
+      fireEvent.click(screen.getByTestId("desc-designate-agent"));
+      await waitFor(() => {
+        expect(screen.getByTestId("desc-skill-designations")).toHaveTextContent(
+          `{"skill-1":["${u6AgentId}"]}`,
+        );
+      });
+
+      fireEvent.change(screen.getByTestId("rich-text-editor"), {
+        target: { value: "First save" },
+      });
+
+      await waitFor(() => {
+        const callsWithDesignation = mockApiObj.updateIssue.mock.calls.filter(
+          (c) => {
+            const body = c[1] as Record<string, unknown> | undefined;
+            return body?.skill_mention_agents !== undefined;
+          },
+        );
+        expect(callsWithDesignation.length).toBeGreaterThan(0);
+      });
+
+      // Wait for the success callback to fire and the consumption to land.
+      await waitFor(() => {
+        expect(screen.getByTestId("desc-skill-designations")).toHaveTextContent("{}");
+      });
+    });
+
+    it("does not re-send the same payload on a second autosave after consumption (KTD1)", async () => {
+      renderIssueDetail();
+      await screen.findByText("Implement authentication");
+      await screen.findByTestId("desc-skill-panel");
+
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      fireEvent.click(screen.getByTestId("desc-menu-insert-skill"));
+      fireEvent.click(screen.getByTestId("desc-designate-agent"));
+      await waitFor(() => {
+        expect(screen.getByTestId("desc-skill-designations")).toHaveTextContent(
+          `{"skill-1":["${u6AgentId}"]}`,
+        );
+      });
+
+      // First autosave — carries the designation.
+      fireEvent.change(screen.getByTestId("rich-text-editor"), {
+        target: { value: "Edit one" },
+      });
+      await waitFor(() => {
+        const calls = mockApiObj.updateIssue.mock.calls.filter((c) => {
+          const body = c[1] as Record<string, unknown> | undefined;
+          return body?.description === "Edit one";
+        });
+        expect(calls.length).toBeGreaterThan(0);
+      });
+      await waitFor(() => {
+        expect(screen.getByTestId("desc-skill-designations")).toHaveTextContent("{}");
+      });
+
+      // Second autosave — must NOT include the designation anymore (KTD1
+      // consumption cleared it after the first success).
+      const callsBeforeSecond = mockApiObj.updateIssue.mock.calls.length;
+      fireEvent.change(screen.getByTestId("rich-text-editor"), {
+        target: { value: "Edit two" },
+      });
+      await waitFor(() => {
+        const calls = mockApiObj.updateIssue.mock.calls.filter((c) => {
+          const body = c[1] as Record<string, unknown> | undefined;
+          return body?.description === "Edit two";
+        });
+        expect(calls.length).toBeGreaterThan(0);
+      });
+      const callsAfterSecond = mockApiObj.updateIssue.mock.calls.length;
+      const newCalls = mockApiObj.updateIssue.mock.calls.slice(callsBeforeSecond, callsAfterSecond);
+      for (const call of newCalls) {
+        const body = call[1] as Record<string, unknown> | undefined;
+        expect(JSON.stringify(body)).not.toContain("skill_mention_agents");
+      }
     });
   });
 

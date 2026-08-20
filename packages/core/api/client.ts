@@ -290,6 +290,7 @@ import {
   UNREADABLE_CRON_PREVIEW_RESPONSE,
   ListIssuesResponseSchema,
   CreateIssueResponseSchema,
+  UpdateIssueResponseSchema,
   IssueSchema,
   ListWebhookDeliveriesResponseSchema,
   RuntimeHourlyActivityListSchema,
@@ -1039,10 +1040,27 @@ export class ApiClient {
   }
 
   async updateIssue(id: string, data: UpdateIssueRequest): Promise<Issue> {
-    return this.fetch(`/api/issues/${id}`, {
+    // Parse through `parseWithFallback` (not a raw cast): the update response
+    // is the only path carrying `skill_designation_outcomes` for edit-path
+    // submissions, and the response is the authoritative source of the
+    // reconciled issue (description / assignee / status) that drives the next
+    // render. A malformed body — drifted labels, missing id, garbled outcome
+    // rows — must surface as the same `Issue | null` rejection used by
+    // createIssue, not as a fabricated "success" issue with missing fields.
+    // parseWithFallback already logged the schema issues + raw payload; the
+    // empty rejection lets the caller render its localized "failed to update"
+    // toast without a misleading optimistic value.
+    const raw = await this.fetch<unknown>(`/api/issues/${id}`, {
       method: "PUT",
       body: JSON.stringify(data),
     });
+    const issue = parseWithFallback<Issue | null>(raw, UpdateIssueResponseSchema, null, {
+      endpoint: "PUT /api/issues/:id",
+    });
+    if (!issue) {
+      throw new Error();
+    }
+    return issue;
   }
 
   async moveIssue(id: string, data: MoveIssueRequest): Promise<Issue> {

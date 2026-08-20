@@ -2217,3 +2217,171 @@ describe("ApiClient workspace MCP servers", () => {
     expect(init.method).toBe("DELETE");
   });
 });
+
+// KTD10 / R16: the create / update issue responses carry the optional
+// `skill_designation_outcomes` field (R16 outcomes shape). The client must
+// (a) parse the field with parseWithFallback + a zod schema (so a malformed
+// payload degrades to `undefined`, never corrupts the cached issue), and
+// (b) reject the call when the body shape is so broken the rest of the
+// issue can't be reconstructed (mirroring the existing createIssue
+// tight-id rule). Both create and update must round-trip a valid body,
+// strip a missing field to undefined, and degrade a wrong-shape field to
+// undefined.
+describe("ApiClient issue create / update skill_designation_outcomes parsing", () => {
+  function stubJSON(body: unknown, status = 200) {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify(body), {
+          status,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+  }
+
+  const baseIssue = {
+    id: "issue-1",
+    workspace_id: "ws-1",
+    number: 1,
+    identifier: "TES-1",
+    title: "Implement auth",
+    description: "Use [@code-review](mention://skill/skill-1)",
+    status: "todo",
+    priority: "none",
+    assignee_type: "agent",
+    assignee_id: "agent-1",
+    creator_type: "member",
+    creator_id: "user-1",
+    parent_issue_id: null,
+    project_id: null,
+    position: 0,
+    stage: null,
+    start_date: null,
+    due_date: null,
+    metadata: {},
+    properties: {},
+    reactions: [],
+    labels: [],
+    created_at: "2026-08-19T00:00:00Z",
+    updated_at: "2026-08-19T00:00:00Z",
+  };
+
+  it("createIssue parses a valid skill_designation_outcomes array", async () => {
+    stubJSON({
+      ...baseIssue,
+      skill_designation_outcomes: [
+        { target_type: "agent", target_id: "agent-1", status: "queued", reason_code: "queued" },
+        { target_type: "agent", target_id: "agent-2", status: "bound", reason_code: "bound" },
+      ],
+    });
+    const issue = await new ApiClient("https://api.example.test").createIssue({
+      title: "t",
+      skill_mention_agents: { "skill-1": ["agent-1"] },
+    });
+    expect(issue.skill_designation_outcomes).toEqual([
+      { target_type: "agent", target_id: "agent-1", status: "queued", reason_code: "queued" },
+      { target_type: "agent", target_id: "agent-2", status: "bound", reason_code: "bound" },
+    ]);
+  });
+
+  it("createIssue treats a missing skill_designation_outcomes field as undefined (no fake empty array)", async () => {
+    stubJSON({ ...baseIssue });
+    const issue = await new ApiClient("https://api.example.test").createIssue({ title: "t" });
+    expect(issue.skill_designation_outcomes).toBeUndefined();
+  });
+
+  it("createIssue degrades a non-array skill_designation_outcomes to undefined (KTD10)", async () => {
+    stubJSON({
+      ...baseIssue,
+      // wrong shape on purpose — a string instead of an array.
+      skill_designation_outcomes: "queued",
+    });
+    const issue = await new ApiClient("https://api.example.test").createIssue({ title: "t" });
+    expect(issue.skill_designation_outcomes).toBeUndefined();
+  });
+
+  it("createIssue rejects when the body is so broken the issue itself can't be reconstructed", async () => {
+    // Missing the required `id` field — the create-side schema rejects.
+    stubJSON({
+      id: "",
+      workspace_id: "ws-1",
+      title: "broken",
+    });
+    await expect(
+      new ApiClient("https://api.example.test").createIssue({ title: "t" }),
+    ).rejects.toThrow();
+  });
+
+  it("updateIssue parses a valid skill_designation_outcomes array", async () => {
+    stubJSON({
+      ...baseIssue,
+      skill_designation_outcomes: [
+        { target_type: "agent", target_id: "agent-1", status: "merged", reason_code: "merged" },
+      ],
+    });
+    const issue = await new ApiClient("https://api.example.test").updateIssue("issue-1", {
+      description: "Use the reviewer",
+      skill_mention_agents: { "skill-1": ["agent-1"] },
+    });
+    expect(issue.skill_designation_outcomes).toEqual([
+      { target_type: "agent", target_id: "agent-1", status: "merged", reason_code: "merged" },
+    ]);
+  });
+
+  it("updateIssue treats a missing skill_designation_outcomes field as undefined", async () => {
+    stubJSON({ ...baseIssue });
+    const issue = await new ApiClient("https://api.example.test").updateIssue("issue-1", {
+      description: "Use the reviewer",
+    });
+    expect(issue.skill_designation_outcomes).toBeUndefined();
+  });
+
+  it("updateIssue degrades a malformed (non-array, null, or garbage) skill_designation_outcomes to undefined", async () => {
+    stubJSON({
+      ...baseIssue,
+      skill_designation_outcomes: null,
+    });
+    const issue = await new ApiClient("https://api.example.test").updateIssue("issue-1", {
+      description: "Use the reviewer",
+    });
+    expect(issue.skill_designation_outcomes).toBeUndefined();
+
+    stubJSON({
+      ...baseIssue,
+      skill_designation_outcomes: { not: "an array" },
+    });
+    const issue2 = await new ApiClient("https://api.example.test").updateIssue("issue-1", {
+      description: "Use the reviewer",
+    });
+    expect(issue2.skill_designation_outcomes).toBeUndefined();
+  });
+
+  it("updateIssue rejects when the body is so broken the issue itself can't be reconstructed", async () => {
+    // Missing the required workspace_id — the issue schema rejects.
+    stubJSON({
+      id: "issue-1",
+      title: "broken",
+    });
+    await expect(
+      new ApiClient("https://api.example.test").updateIssue("issue-1", { description: "x" }),
+    ).rejects.toThrow();
+  });
+
+  it("createIssue / updateIssue still tolerate an unknown status / reason_code (lenient enum)", async () => {
+    // Lenient: unknown status / reason_code parse as plain strings so the
+    // consumer's switch-default branch handles them (per CLAUDE.md "API
+    // Response Compatibility"). The body itself is otherwise valid.
+    stubJSON({
+      ...baseIssue,
+      skill_designation_outcomes: [
+        { target_type: "agent", target_id: "agent-1", status: "future-status", reason_code: "future-reason" },
+      ],
+    });
+    const issue = await new ApiClient("https://api.example.test").createIssue({ title: "t" });
+    expect(issue.skill_designation_outcomes?.[0]).toMatchObject({
+      status: "future-status",
+      reason_code: "future-reason",
+    });
+  });
+});

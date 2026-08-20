@@ -81,3 +81,27 @@ export interface CommentTriggerPreview {
   // (MUL-4525 §2). Additive: older servers omit it.
   blocked?: CommentTriggerOutcome[];
 }
+
+// Per-agent result of one @skill designation carried on an issue create or
+// update request (R16, KTD10). Mirrors CommentTriggerOutcome — same status
+// shape, same reason-code enumeration — so the toast surface can reuse a
+// single reason-code → copy mapping. target_id is the agent id the caller
+// itself designated (already known to it), never a name, so a blocked
+// private target leaks nothing new. The new `bound` / `merged` statuses are
+// non-error end states exclusive to the issue path (comment-path
+// designations always enqueue).
+export type IssueSkillDesignationStatus =
+ | "queued"
+ | "coalesced"
+ | "deferred"
+ | "blocked"
+ | "bound"
+ | "merged"
+ | string;
+
+export interface IssueSkillDesignationOutcome {
+  target_type: string;
+  target_id: string;
+  status: IssueSkillDesignationStatus;
+  reason_code: string;
+}

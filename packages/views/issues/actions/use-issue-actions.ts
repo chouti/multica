@@ -18,7 +18,10 @@ import { useIssueSurfaceActionsOptional } from "../surface/actions-context";
 
 export interface UseIssueActionsResult {
   isPinned: boolean;
-  updateField: (updates: Partial<UpdateIssueRequest>) => void;
+  updateField: (
+    updates: Partial<UpdateIssueRequest>,
+    options?: { onSuccess?: () => void },
+  ) => void;
   openInNewTab: () => void;
   togglePin: () => void;
   copyLink: () => Promise<void>;
@@ -69,7 +72,10 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
   const issueStatus = issue?.status ?? null;
 
   const updateField = useCallback(
-    (updates: Partial<UpdateIssueRequest>) => {
+    (
+      updates: Partial<UpdateIssueRequest>,
+      options?: { onSuccess?: () => void },
+    ) => {
       if (!issueId) return;
       if (updates.status === "archived" && issueStatus === "archived") {
         toast.error(t(($) => $.archived.toast_error));
@@ -107,6 +113,7 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
             },
           });
         }
+        options?.onSuccess?.();
       };
       if (surfaceActions) {
         surfaceActions.updateIssue(issueId, updates, {

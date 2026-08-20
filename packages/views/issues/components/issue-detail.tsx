@@ -73,6 +73,7 @@ import { CommentInput } from "./comment-input";
 import { formatProgressText } from "./child-progress";
 import { CurrentIssueRenderContextProvider } from "../current-issue-render-context";
 import { useSkillAutoBind } from "../hooks/use-skill-auto-bind";
+import { useSkillDesignationSubmit } from "../hooks/use-skill-designation-submit";
 import { ResolvedThreadBar } from "./resolved-thread-bar";
 import { getShortcut, shortcutMatchesEvent } from "@multica/core/shortcuts";
 import { isImeComposing } from "@multica/core/utils";
@@ -1895,6 +1896,42 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     setOpenPopoverFor(null);
     autoBind.reset();
   }, [id, autoBind.reset]);
+
+  // U6: the skill-designation submit pipeline (KTD1 single-consumption,
+  // D1 retry, R10 touch-only). Used by the AE8 popover-close trigger
+  // below for touch-only updates that carry no description change — the
+  // regular autosave path includes `skill_mention_agents` directly in the
+  // update body (see `handleUpdateField` calls). The hook's onSuccess
+  // clears the composer-held map so a follow-up autosave that fires
+  // before the editor re-mounts does not re-send the same payload.
+  const designationSubmit = useSkillDesignationSubmit({
+    issueId: id,
+    skillMentionAgents,
+    onSuccess: () => {
+      // Consume (KTD1): the in-flight submission landed, so a subsequent
+      // autosave should not re-send the same payload. Keep the map empty
+      // until the user touches another chip.
+      setSkillMentionAgents({});
+    },
+  });
+  // AE8 trigger (R10): when the popover closes (open → close transition)
+  // AND the composer-held designation map still has entries, fire a bare
+  // update carrying just `skill_mention_agents`. The regular autosave path
+  // also covers the description-change case — both paths clear on success,
+  // so a touch-followed-by-typing sequence fires twice at most, with the
+  // second submit being a no-op on an empty map. The KTD1 single-
+  // consumption guard inside the hook prevents same-payload double-fires
+  // from this AE8 path itself (e.g. rapid open / close cycles).
+  const prevPopoverForRef = useRef<string | null>(null);
+  useEffect(() => {
+    const prev = prevPopoverForRef.current;
+    prevPopoverForRef.current = openPopoverFor;
+    // Popover just closed AND we have a pending designation to ship.
+    if (prev !== null && openPopoverFor === null && Object.keys(skillMentionAgents).length > 0) {
+      designationSubmit.submit({ source: "user-typing" });
+    }
+  }, [openPopoverFor, skillMentionAgents, designationSubmit]);
+
   // Keep the description editor mounted from the start. Unlike the empty
   // composer shells, a long rendered description cannot swap between
   // react-markdown and ProseMirror without small per-block height differences
@@ -2816,6 +2853,27 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                   description: md,
                   description_base: baseMarkdown,
                   attachment_ids: ids.length > 0 ? ids : undefined,
+                  // U6: include the pending skill designation map in the
+                  // autosave body so a description edit can carry a
+                  // designation in the same request. Omit when empty so
+                  // the server treats it as "no designation" (R12). The
+                  // AE8 popover-close trigger covers the no-description-
+                  // change case; both paths share `setSkillMentionAgents({})`
+                  // on success (KTD1 consumption).
+                  skill_mention_agents:
+                    Object.keys(skillMentionAgents).length > 0
+                      ? skillMentionAgents
+                      : undefined,
+                }, {
+                  // KTD1 consumption: the autosave carried the pending
+                  // designation and the server accepted it. Clear the
+                  // composer-held map so a follow-up autosave (debounced
+                  // 1500ms) does not re-send the same payload.
+                  onSuccess: () => {
+                    if (Object.keys(skillMentionAgents).length > 0) {
+                      setSkillMentionAgents({});
+                    }
+                  },
                 });
               }}
               onUploadFile={handleDescriptionUpload}

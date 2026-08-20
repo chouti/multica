@@ -1308,6 +1308,118 @@ describe("CreateIssueModal", () => {
     });
   });
 
+  // U6: the create path carries the @skill designation map in the same
+  // payload as the issue create so the server binds inside the create
+  // transaction (R6 / U2). The mutation is fired from the modal's existing
+  // submit handler; U6 contributes `skill_mention_agents` and the terminal
+  // fill (auto-bind engine's `finalizeSkillMentionAgents()`). The test
+  // verifies the wire-shape, the empty-map omit (R12), and that
+  // post-submit `resetForNextIssue` clears the composer-held state.
+  describe("skill designation submit pipeline (U6)", () => {
+    beforeEach(() => {
+      mockAgentList.agents = [
+        { id: "agent-1", name: "Agent One", archived_at: null, runtime_id: "runtime-1", runtime_bound: true },
+      ];
+      // Default: a queued outcome per designated agent so the toast
+      // surface has something to render. Tests override per-case.
+      mockCreateIssue.mockResolvedValue({
+        id: "issue-123",
+        identifier: "TES-123",
+        number: 123,
+        workspace_id: "ws-test",
+        title: "Created",
+        description: null,
+        status: "todo",
+        status_category: "todo",
+        priority: "none",
+        assignee_type: null,
+        assignee_id: null,
+        creator_type: "member",
+        creator_id: "user-1",
+        parent_issue_id: null,
+        project_id: null,
+        position: 0,
+        stage: null,
+        start_date: null,
+        due_date: null,
+        metadata: {},
+        properties: {},
+        reactions: [],
+        labels: [],
+        created_at: "2026-08-19T00:00:00Z",
+        updated_at: "2026-08-19T00:00:00Z",
+        skill_designation_outcomes: [
+          { target_type: "agent", target_id: "agent-1", status: "queued", reason_code: "queued" },
+        ],
+      });
+    });
+
+    it("forwards skill_mention_agents on create when the composer-held map has entries", async () => {
+      const user = userEvent.setup();
+      renderModal(<CreateIssueModal onClose={vi.fn()} />);
+
+      fireEvent.change(screen.getByPlaceholderText("Issue title"), {
+        target: { value: "Designated" },
+      });
+      // Insert a chip via the @-menu so it counts as a typed (user-typing)
+      // insertion (U5 / KTD3), then designate an agent in the picker so the
+      // composer-held map has an entry to send.
+      const editor = await screen.findByPlaceholderText("Add description...");
+      fireEvent.click(screen.getByTestId("desc-menu-insert-skill"));
+      // Drain microtasks so the auto-bind engine resolves + fills the
+      // recommendation; this lets the test exercise the populated-map path.
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      // Belt-and-braces: explicitly designate so the map has an entry
+      // regardless of the recommendation engine's resolution.
+      fireEvent.click(screen.getByTestId("desc-designate-agent"));
+      await waitFor(() => {
+        expect(screen.getByTestId("desc-skill-designations")).toHaveTextContent(
+          '{"skill-1":["agent-1"]}',
+        );
+      });
+      // Silence the act() warning for the editor change.
+      fireEvent.change(editor, { target: { value: "Use the reviewer" } });
+
+      await user.click(screen.getByRole("button", { name: "Create Issue" }));
+
+      await waitFor(() => {
+        expect(mockCreateIssue).toHaveBeenCalledWith(
+          expect.objectContaining({
+            title: "Designated",
+            skill_mention_agents: { "skill-1": ["agent-1"] },
+          }),
+        );
+      });
+    });
+
+    it("omits skill_mention_agents when the composer-held map is empty (R12 — no explicit clear)", async () => {
+      const user = userEvent.setup();
+      renderModal(<CreateIssueModal onClose={vi.fn()} />);
+
+      fireEvent.change(screen.getByPlaceholderText("Issue title"), {
+        target: { value: "Plain" },
+      });
+      // No chip inserted → map stays empty → field must be omitted so the
+      // server treats it as "no designation" rather than an explicit clear.
+      await user.click(screen.getByRole("button", { name: "Create Issue" }));
+
+      await waitFor(() => {
+        expect(mockCreateIssue).toHaveBeenCalled();
+      });
+      const call = mockCreateIssue.mock.calls[0]?.[0] as Record<string, unknown> | undefined;
+      expect(call).toBeDefined();
+      // The wire-level contract: an empty map is omitted from the JSON
+      // body (server treats omitted as "no designation", R12). JSON.stringify
+      // drops `undefined` values, so the assertion targets the serialized
+      // payload, not the in-memory object — a property explicitly set to
+      // `undefined` does NOT exist on the wire.
+      expect(JSON.stringify(call)).not.toContain("skill_mention_agents");
+    });
+  });
+
   // Reporter scenario: backend rejects same-titled create with a 409 +
   // structured duplicate body. The user should land on a duplicate toast
   // pointing at the existing issue, not a generic "create failed" message.

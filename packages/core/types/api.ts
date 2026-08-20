@@ -20,6 +20,16 @@ export interface CreateIssueRequest {
   /** Issue-scoped label IDs to attach in the same transaction as the create.
    *  Unknown or non-issue ids are rejected by the server with 400. */
   label_ids?: string[];
+  /** Per-skill agent designations the @skill chips in the description editor
+   *  resolved to in this session. Skill id → agent ids (capped per-skill 8 +
+   *  whole-map 16 by the server, mirroring the comment path). The server
+   *  binds / enqueues per request (R6, R9, R15, R16): R6 binds inside the
+   *  create transaction so the first run already carries the skill; R7
+   *  folds designation-of-the-assignee into the create's natural enqueue
+   *  to avoid a duplicate run; R8 suppresses the run when status is
+   *  backlog. Omit to keep "no designation"; send `{}` to clear every
+   *  designation for the issue. */
+  skill_mention_agents?: Record<string, string[]>;
 }
 
 export interface UpdateIssueRequest {
@@ -51,6 +61,15 @@ export interface UpdateIssueRequest {
    *  context (MUL-3375). Only consumed when a run actually starts. Control
    *  field — strip from optimistic cache patches. */
   handoff_note?: string;
+  /** Per-skill agent designations the @skill chips in the description editor
+   *  resolved to in this session. Skill id → agent ids (capped per-skill 8 +
+   *  whole-map 16 by the server, mirroring the comment path). Bind-only,
+   *  run-trigger, or merge decisions are the server's call (R6, R9, R15,
+   *  R16). Omit the field to keep the existing binding untouched; send an
+   *  empty map to explicitly clear every designation for this issue.
+   *  Control field — strip from optimistic cache patches; never written onto
+   *  the Issue. */
+  skill_mention_agents?: Record<string, string[]>;
 }
 
 /**

@@ -513,6 +513,11 @@ export function ManualCreatePanel({
       const activeAttachmentIds = draftAttachments
         .filter((a) => contentReferencesAttachment(description ?? "", a))
         .map((a) => a.id);
+      // U6: terminal fill — read the live recommendation state for chips
+      // the auto-bind engine resolved but whose fill effect hasn't
+      // committed yet (cold-start race, KTD5). Empty map → omit the field
+      // (server treats omitted as "no designation", R12).
+      const skillMentionAgentsPayload = autoBind.finalizeSkillMentionAgents();
       const issue = await createIssueMutation.mutateAsync({
         title: title.trim(),
         description,
@@ -529,6 +534,11 @@ export function ManualCreatePanel({
         // backend that predates this ignores the field — handled by the
         // compatibility fallback below.
         label_ids: labelIds.length > 0 ? labelIds : undefined,
+        // @skill designation map. Sent alongside the create payload so the
+        // server binds the agents in the same transaction (R6 / U2). Empty
+        // map is omitted — sending `{}` would explicitly clear every
+        // designation, which the user did not ask for here (R12).
+        skill_mention_agents: skillMentionAgentsPayload,
         parent_issue_id: parentIssueId,
         // Stage is only meaningful for a sub-issue (relative to its siblings).
         stage: parentIssueId && stage != null ? stage : undefined,

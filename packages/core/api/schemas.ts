@@ -1027,7 +1027,26 @@ export const ListIssuesResponseSchema = z.object({
   total: z.number().default(0),
 }).loose();
 
-// Response schema for POST /api/issues. Two tightenings over IssueSchema:
+// Per-agent result of an @skill designation carried on an issue create or
+// update request (R16, KTD10). Mirrors the comment path's
+// CommentTriggerOutcome shape — the same status enum is reused so the toast
+// surface can share a single reason-code → copy mapping. `target_id` is the
+// agent id the caller itself designated (already known to it), never a name,
+// so a blocked private target leaks nothing new. Lenient by the rules in
+// CLAUDE.md "API Response Compatibility": unknown status / reason values
+// parse as plain strings and fall through the consumer's default branch.
+//
+// Declared BEFORE the response schemas that consume it: TypeScript forbids
+// referring to a `const` from a higher line, and the create / update
+// response schemas reference this directly.
+export const IssueSkillDesignationOutcomeSchema = z.object({
+  target_type: z.string(),
+  target_id: z.string(),
+  status: z.string(),
+  reason_code: z.string(),
+}).loose();
+
+// Response schema for POST /api/issues. Three tightenings over IssueSchema:
 //
 //   - `id` must be non-empty. A created issue always carries a real id, so an
 //     empty/absent id means the create effectively failed. createIssue turns a
@@ -1041,9 +1060,26 @@ export const ListIssuesResponseSchema = z.object({
 //     object, a garbage array) can never masquerade as "handled" and suppress
 //     the fallback. Unlike the loose IssueSchema.labels (z.array(z.unknown())),
 //     the elements are fully validated. See packages/views/modals/create-issue.tsx.
+//   - `skill_designation_outcomes` carries the per-agent result of every
+//     @skill designation carried on the request (R16, KTD10). It is
+//     additive on the wire — old clients ignore the field — but the frontend
+//     toast / R16 feedback surface reads it after a create or update. Validate
+//     strictly when present, fall back to `undefined` on a wrong shape so a
+//     malformed value can never masquerade as "no designations to report".
 export const CreateIssueResponseSchema = IssueSchema.extend({
   id: z.string().min(1),
   labels: z.array(LabelSchema).optional().catch(undefined),
+  skill_designation_outcomes: z.array(IssueSkillDesignationOutcomeSchema).optional().catch(undefined),
+}).loose();
+
+// Response schema for PUT /api/issues/:id. Mirrors CreateIssueResponseSchema's
+// additive `skill_designation_outcomes` handling; doesn't tighten `id` because
+// update responses always include the issue id, but follows the same lenient
+// labels / outcomes pattern so a malformed shape degrades to absent rather
+// than failing the call (KTD10 / R16).
+export const UpdateIssueResponseSchema = IssueSchema.extend({
+  labels: z.array(LabelSchema).optional().catch(undefined),
+  skill_designation_outcomes: z.array(IssueSkillDesignationOutcomeSchema).optional().catch(undefined),
 }).loose();
 
 export const EMPTY_LIST_ISSUES_RESPONSE: ListIssuesResponse = {

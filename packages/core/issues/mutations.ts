@@ -114,12 +114,16 @@ export function useUpdateIssue() {
       // is resolved against that base on the server and therefore is not safe
       // to predict optimistically. Keep the authoritative raw description in
       // cache so hidden channel-media markers remain available as the base for
-      // a rapid follow-up edit. mutationFn still sends the full payload.
+      // a rapid follow-up edit. skill_mention_agents is also a control field
+      // — the server binds / enqueues per request and the chip designation
+      // map is composer state, never a cache column. mutationFn still sends
+      // the full payload.
       const {
         suppress_run: _suppressRun,
         handoff_note: _handoffNote,
         description: _description,
         description_base: _descriptionBase,
+        skill_mention_agents: _skillMentionAgents,
         ...patch
       } = data;
       // Fire-and-forget cancelQueries — keeps onMutate synchronous so the
@@ -219,6 +223,7 @@ export function useUpdateIssue() {
         handoff_note: _handoffNote,
         description_base: _descriptionBase,
         move_intent: _moveIntent,
+        skill_mention_agents: _skillMentionAgents,
         id: _id,
         ...intent
       } = vars;
@@ -393,12 +398,15 @@ export function useBatchUpdateIssues() {
       // Control and description-merge fields are not safe optimistic cache
       // patches. The server resolves description against description_base, so
       // preserve the authoritative raw description (including media markers)
-      // until a refetch returns the committed result.
+      // until a refetch returns the committed result. skill_mention_agents
+      // is a per-request write payload — never an Issue column — so strip it
+      // alongside the other control fields.
       const {
         suppress_run: _suppressRun,
         handoff_note: _handoffNote,
         description: _description,
         description_base: _descriptionBase,
+        skill_mention_agents: _skillMentionAgents,
         ...patch
       } = updates;
       await qc.cancelQueries({ queryKey: issueKeys.list(wsId) });

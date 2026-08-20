@@ -1,5 +1,6 @@
 import type { Label } from "./label";
 import type { IssuePropertyValues } from "./property";
+import type { IssueSkillDesignationOutcome } from "./comment";
 
 /**
  * A status CATEGORY — the behavior equivalence class an issue's status belongs
@@ -94,4 +95,12 @@ export interface Issue {
   labels?: Label[];
   created_at: string;
   updated_at: string;
+  // Per-agent result of every @skill designation carried on the create or
+  // update request that produced this body (R16, KTD10). Additive on the
+  // wire: older servers omit it; the field is undefined rather than `[]`
+  // so consumers can distinguish "no designations sent" from "designations
+  // all succeeded". Reading the field off a list/detail response is
+  // undefined behavior — it is only populated on the create / update
+  // response, not on subsequent list / detail fetches.
+  skill_designation_outcomes?: IssueSkillDesignationOutcome[];
 }
