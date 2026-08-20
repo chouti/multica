@@ -3229,7 +3229,7 @@ func (h *Handler) applyCreateIssueSkillDesignations(ctx context.Context, issue d
 			merged()
 			continue
 		}
-		if _, err := h.TaskService.EnqueueTaskForMentionWithActor(ctx, issue, agentID, memberActorUserID(actorType, actorID)); err != nil {
+		if _, err := h.TaskService.EnqueueTaskForMentionWithActor(ctx, issue, agentID, "", memberActorUserID(actorType, actorID)); err != nil {
 			// A sibling task won the insert race between the pending check and
 			// the enqueue: the agent is covered — merged, never an error.
 			if errors.Is(err, service.ErrDuplicatePendingTask) {
@@ -3242,6 +3242,190 @@ func (h *Handler) applyCreateIssueSkillDesignations(ctx context.Context, issue d
 		outcomes = append(outcomes, IssueSkillDesignationOutcome{TargetType: "agent", TargetID: key, Status: DispatchQueued, ReasonCode: ReasonQueued})
 	}
 	return outcomes
+}
+
+// bindIssueSkillDesignations writes the durable agent_skill rows for every
+// gate-admitted (skill, agent) pair on the EDIT path (KTD2 edit-side:
+// post-commit best-effort, sequenced before any enqueue in the handler). Each
+// upsert converges on enabled=TRUE regardless of prior row state — the same
+// primitive the comment and create paths use. A single failure is logged and
+// skipped so it cannot strand the remaining pairs; the split reports its own
+// per-agent run outcome independently of bind failures.
+func (h *Handler) bindIssueSkillDesignations(ctx context.Context, issue db.Issue, designations map[pgtype.UUID][]pgtype.UUID) {
+	for skillID, agentIDs := range designations {
+		for _, agentID := range agentIDs {
+			if !skillID.Valid || !agentID.Valid {
+				continue
+			}
+			if _, err := h.Queries.UpsertAgentSkillEnabled(ctx, db.UpsertAgentSkillEnabledParams{
+				AgentID: agentID,
+				SkillID: skillID,
+			}); err != nil {
+				slog.Warn("issue skill designation bind: upsert failed (continuing)",
+					"issue_id", uuidToString(issue.ID),
+					"agent_id", uuidToString(agentID),
+					"skill_id", uuidToString(skillID),
+					"error", err)
+				continue
+			}
+		}
+	}
+}
+
+// applyUpdateIssueSkillDesignations runs the post-update half of the edit-path
+// designation flow (R9), once per gate-admitted agent (an agent designated for
+// several chips gets one run carrying all of them — the binds already landed).
+// Arbitration uses the FINAL persisted issue, never the pre-lock snapshot:
+//
+//   - an already-pending (issue, agent) run — the natural assignee/leader run
+//     this same write dispatched, or a pre-existing one — absorbs the trigger:
+//     merged, never a second enqueue or an error (review M3 pending guard);
+//   - designating the final assignee agent, or the squad assignee's leader, is
+//     a content-maintenance gesture → bound (bind-only), never a designation
+//     run. The explicit leader branch keeps a leader designation with NO
+//     pending leader task from being enqueued as if non-assignee (M3);
+//   - backlog final status (R11) or SuppressRun (KTD6) parks the run but never
+//     the bind → bound;
+//   - otherwise the designated non-assignee is enqueued via
+//     EnqueueTaskForMentionWithActor with the editing member as the
+//     accountable human and the KTD7 handoff event summary.
+//
+// The blocked outcomes from the post-commit gate are folded in so the response
+// carries one outcome per designated agent (R16).
+func (h *Handler) applyUpdateIssueSkillDesignations(ctx context.Context, issue db.Issue, designations map[pgtype.UUID][]pgtype.UUID, actorType, actorID string, suppressRun bool, blocked []IssueSkillDesignationOutcome) []IssueSkillDesignationOutcome {
+	outcomes := blocked
+	if len(designations) == 0 {
+		return outcomes
+	}
+
+	// Distinct admitted agents in first-seen order, each with the skills it was
+	// designated for (for the handoff summary).
+	type agentDesignation struct {
+		agentID  pgtype.UUID
+		skillIDs []pgtype.UUID
+	}
+	agents := make(map[string]*agentDesignation)
+	var order []string
+	for skillID, agentIDs := range designations {
+		for _, agentID := range agentIDs {
+			key := uuidToString(agentID)
+			d, ok := agents[key]
+			if !ok {
+				d = &agentDesignation{agentID: agentID}
+				agents[key] = d
+				order = append(order, key)
+			}
+			d.skillIDs = append(d.skillIDs, skillID)
+		}
+	}
+
+	isBacklog := issuestatus.Effective(ctx, h.Queries, issue.WorkspaceID, issue.Status) == "backlog"
+
+	// Squad equivalence (review M3): when the final assignee is a squad, its
+	// leader counts as the assignee for the bind-only comparison.
+	var squadLeaderID pgtype.UUID
+	if issue.AssigneeType.Valid && issue.AssigneeType.String == "squad" && issue.AssigneeID.Valid {
+		if squad, err := h.Queries.GetSquadInWorkspace(ctx, db.GetSquadInWorkspaceParams{
+			ID:          issue.AssigneeID,
+			WorkspaceID: issue.WorkspaceID,
+		}); err == nil {
+			squadLeaderID = squad.LeaderID
+		}
+	}
+
+	for _, key := range order {
+		d := agents[key]
+		bound := func() {
+			outcomes = append(outcomes, IssueSkillDesignationOutcome{TargetType: "agent", TargetID: key, Status: DispatchBound, ReasonCode: ReasonDeferred})
+		}
+		merged := func() {
+			outcomes = append(outcomes, IssueSkillDesignationOutcome{TargetType: "agent", TargetID: key, Status: DispatchMerged, ReasonCode: ReasonCoalesced})
+		}
+
+		// Pending guard first (M3): a run that already covers this agent — the
+		// natural assignee/leader run this write dispatched, or a pre-existing
+		// pending task — absorbs the designation trigger.
+		hasPending, err := h.hasPendingTaskForIssueAndAgent(ctx, issue.ID, d.agentID, commentTriggerComputeOptions{})
+		if err != nil {
+			outcomes = append(outcomes, IssueSkillDesignationOutcome{TargetType: "agent", TargetID: key, Status: DispatchBlocked, ReasonCode: ReasonInternalError})
+			continue
+		}
+		if hasPending {
+			merged()
+			continue
+		}
+		// R9 final-basis assignee match: the final assignee agent, or the squad
+		// assignee's leader, is bound but never designation-triggered.
+		if issue.AssigneeType.Valid && issue.AssigneeType.String == "agent" && issue.AssigneeID == d.agentID {
+			bound()
+			continue
+		}
+		if squadLeaderID.Valid && squadLeaderID == d.agentID {
+			bound()
+			continue
+		}
+		// R11/KTD6: backlog and SuppressRun park the run; the bind stands.
+		if isBacklog || suppressRun {
+			bound()
+			continue
+		}
+		note := h.issueSkillDesignationHandoffNote(ctx, issue, actorType, actorID, d.skillIDs)
+		if _, err := h.TaskService.EnqueueTaskForMentionWithActor(ctx, issue, d.agentID, note, memberActorUserID(actorType, actorID)); err != nil {
+			// A sibling task won the insert race between the pending check and
+			// the enqueue: the agent is covered — merged, never an error.
+			if errors.Is(err, service.ErrDuplicatePendingTask) {
+				merged()
+				continue
+			}
+			outcomes = append(outcomes, IssueSkillDesignationOutcome{TargetType: "agent", TargetID: key, Status: DispatchBlocked, ReasonCode: commentEnqueueFailureReason(err)})
+			continue
+		}
+		outcomes = append(outcomes, IssueSkillDesignationOutcome{TargetType: "agent", TargetID: key, Status: DispatchQueued, ReasonCode: ReasonQueued})
+	}
+	return outcomes
+}
+
+// issueSkillDesignationHandoffNote composes the KTD7 event summary stamped on
+// an edit-path designation-triggered run: the editing actor, the designated
+// skill labels, and that the gesture happened while editing the issue
+// description. It deliberately never quotes the description body and never
+// touches a user-written handoff field. An old daemon that cannot render the
+// note drops it and the run degrades to reading the description itself
+// (runtimeSupportsHandoff already covers the preview soft-signal).
+func (h *Handler) issueSkillDesignationHandoffNote(ctx context.Context, issue db.Issue, actorType, actorID string, skillIDs []pgtype.UUID) string {
+	actorName := "Someone"
+	if id, err := util.ParseUUID(actorID); err == nil {
+		switch actorType {
+		case "member":
+			if u, err := h.Queries.GetUser(ctx, id); err == nil && u.Name != "" {
+				actorName = u.Name
+			}
+		case "agent":
+			if a, err := h.Queries.GetAgent(ctx, id); err == nil && a.Name != "" {
+				actorName = a.Name
+			}
+		}
+	}
+	labels := make([]string, 0, len(skillIDs))
+	for _, skillID := range skillIDs {
+		if !skillID.Valid {
+			continue
+		}
+		if skill, err := h.Queries.GetSkillInWorkspace(ctx, db.GetSkillInWorkspaceParams{
+			ID:          skillID,
+			WorkspaceID: issue.WorkspaceID,
+		}); err == nil {
+			labels = append(labels, "@"+skill.Name)
+		}
+	}
+	if len(labels) == 0 {
+		return ""
+	}
+	noun := "skill"
+	if len(labels) > 1 {
+		noun = "skills"
+	}
+	return fmt.Sprintf("%s designated you to apply the %s %s while editing the issue description.", actorName, strings.Join(labels, ", "), noun)
 }
 
 type UpdateIssueRequest struct {
@@ -3449,12 +3633,14 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	json.Unmarshal(bodyBytes, &rawFields)
 
 	// Validate the skill_mention_agents designation map shape at the boundary
-	// (malformed agent UUID / per-skill or map cap → 400 before any write).
-	// TODO(plan U3): the parsed map is intentionally discarded here until the
-	// edit-path designation wiring (gated bind + trigger fan-out) consumes it.
-	// Until then an absent or well-formed field is a no-op with zero behavior
-	// change.
-	if _, ok := parseSkillMentionAgents(w, req.SkillMentionAgents, "skill_mention_agents"); !ok {
+	// (malformed agent UUID / per-skill or map cap → 400 before any write). The
+	// parsed map is consumed after the update commits: gated against the FINAL
+	// persisted description (R15 content coupling — a chip deleted mid-edit is
+	// gone from it), bound post-commit best-effort (KTD2 edit-side), and split
+	// by the FINAL assignee/status (R9). An absent or empty map skips all of it
+	// with zero behavior change (R12).
+	skillMentionAgents, ok := parseSkillMentionAgents(w, req.SkillMentionAgents, "skill_mention_agents")
+	if !ok {
 		return
 	}
 
@@ -3688,6 +3874,26 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	// Determine actor identity: agent (via X-Agent-ID header) or member.
 	actorType, actorID := h.resolveActor(r, userID, workspaceID)
 
+	// Edit-path @skill designations, gated post-commit against the FINAL
+	// persisted description (R15): only designations whose skill chip survived
+	// the edit are honored, and every designated agent must clear the comment
+	// path's gate set (workspace resolution, canInvokeAgent, archived, runtime)
+	// with the editing actor — member or agent — as the invoker. Gate-admitted
+	// pairs are bound here, BEFORE any enqueue below (KTD2 edit-side
+	// best-effort), so a natural assignee/leader run this write starts already
+	// carries the designated skill. The per-agent split runs after
+	// WillEnqueueRun so its pending guard observes that natural run.
+	var skillDesignations map[pgtype.UUID][]pgtype.UUID
+	var designationBlocked []IssueSkillDesignationOutcome
+	if len(skillMentionAgents) > 0 {
+		finalDescription := ""
+		if issue.Description.Valid {
+			finalDescription = issue.Description.String
+		}
+		skillDesignations, designationBlocked = h.gateIssueSkillDesignations(r.Context(), issue.WorkspaceID, finalDescription, skillMentionAgents, actorType, actorID, h.invokeOriginatorFromRequest(r, actorType, actorID))
+		h.bindIssueSkillDesignations(r.Context(), issue, skillDesignations)
+	}
+
 	h.publish(protocol.EventIssueUpdated, workspaceID, actorType, actorID, map[string]any{
 		"issue":               resp,
 		"assignee_changed":    assigneeChanged,
@@ -3737,6 +3943,17 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		h.issueTriggerWriteProbe(r, actorType, actorID, issue),
 	); ok && !req.SuppressRun {
 		h.dispatchIssueRun(r.Context(), issue, trigger, actorType, actorID, req.HandoffNote)
+	}
+
+	// Designation split on the FINAL assignee/status (R9): designating the
+	// assignee (or the squad assignee's leader — review M3) binds only; backlog
+	// (R11) and SuppressRun (KTD6) park the run but never the bind; any other
+	// designated agent is enqueued with the KTD7 handoff event summary. Runs
+	// after the natural dispatch above so an (issue, agent) run this write
+	// already started absorbs the designation (merged, never a double-fire).
+	// WillEnqueueRun itself stays assignee/squad-leader only (KTD4).
+	if len(skillMentionAgents) > 0 {
+		resp.SkillDesignationOutcomes = h.applyUpdateIssueSkillDesignations(r.Context(), issue, skillDesignations, actorType, actorID, req.SuppressRun, designationBlocked)
 	}
 
 	// Platform-driven parent notification: when this issue transitions into

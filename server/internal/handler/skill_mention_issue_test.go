@@ -776,3 +776,497 @@ func TestSkillMentionIssueCreate_SquadLeaderDesignationMerges(t *testing.T) {
 		t.Fatalf("expected merged outcome for the squad-leader designation, got %+v", outcomes)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// U3: edit-path designation wiring — post-commit gate against the FINAL merged
+// description (R15 content coupling), best-effort bind before any enqueue
+// (KTD2 edit-side), final-assignee/status split (R9: assignee / squad leader
+// bind-only; R11 backlog + KTD6 SuppressRun park the run but never the bind),
+// pending-guard merge (review M3), the KTD7 handoff event summary on
+// designation-triggered runs, and per-agent outcomes on the update response
+// (R16). These tests drive the real UpdateIssue handler against the local dev
+// DB.
+// ---------------------------------------------------------------------------
+
+// decodeUpdateIssueDesignations decodes the update response body and returns
+// the issue id plus its designation outcomes.
+func decodeUpdateIssueDesignations(t *testing.T, w *httptest.ResponseRecorder) (string, []skillDesignationOutcomeView) {
+	t.Helper()
+	var resp struct {
+		ID                       string                        `json:"id"`
+		SkillDesignationOutcomes []skillDesignationOutcomeView `json:"skill_designation_outcomes"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode update response: %v", err)
+	}
+	if resp.ID == "" {
+		t.Fatalf("update response missing issue id")
+	}
+	return resp.ID, resp.SkillDesignationOutcomes
+}
+
+// setIssueAssigneeStatusForTest rewrites the fixture issue's persisted status
+// and assignee directly, so an edit-path test starts from a known pre-state
+// (the given, not the behavior under test). Empty assigneeType/assigneeID
+// store NULL (unassigned).
+func setIssueAssigneeStatusForTest(t *testing.T, issueID, status, assigneeType, assigneeID string) {
+	t.Helper()
+	var at, aid any
+	if assigneeType != "" {
+		at = assigneeType
+	}
+	if assigneeID != "" {
+		aid = assigneeID
+	}
+	if _, err := testPool.Exec(context.Background(),
+		`UPDATE issue SET status = $2, assignee_type = $3, assignee_id = $4 WHERE id = $1`,
+		issueID, status, at, aid); err != nil {
+		t.Fatalf("set issue assignee/status: %v", err)
+	}
+}
+
+// setIssueDescriptionForTest rewrites the fixture issue's persisted
+// description directly (a test pre-state, e.g. a chip an earlier autosave
+// already committed).
+func setIssueDescriptionForTest(t *testing.T, issueID, description string) {
+	t.Helper()
+	if _, err := testPool.Exec(context.Background(),
+		`UPDATE issue SET description = $2 WHERE id = $1`, issueID, description); err != nil {
+		t.Fatalf("set issue description: %v", err)
+	}
+}
+
+// loadDesignationTask reads the single queued/dispatched task for (agent,
+// issue) so tests can assert the run's handoff note and attribution.
+func loadDesignationTask(t *testing.T, agentID, issueID string) (handoffNote string, originator string) {
+	t.Helper()
+	var note, orig *string
+	if err := testPool.QueryRow(context.Background(), `
+		SELECT handoff_note, originator_user_id::text FROM agent_task_queue
+		WHERE issue_id = $1 AND agent_id = $2 AND status IN ('queued', 'dispatched')
+	`, issueID, agentID).Scan(&note, &orig); err != nil {
+		t.Fatalf("load designation task: %v", err)
+	}
+	if note != nil {
+		handoffNote = *note
+	}
+	if orig != nil {
+		originator = *orig
+	}
+	return handoffNote, originator
+}
+
+// skillNameForTest loads a skill row's display name for handoff-note
+// assertions.
+func skillNameForTest(t *testing.T, skillID string) string {
+	t.Helper()
+	var name string
+	if err := testPool.QueryRow(context.Background(),
+		`SELECT name FROM skill WHERE id = $1`, skillID).Scan(&name); err != nil {
+		t.Fatalf("load skill name: %v", err)
+	}
+	return name
+}
+
+// TestSkillMentionIssueUpdate_DesignateAssigneeBindsOnly covers AE2: an edit
+// that designates the issue's current assignee agent binds that agent to the
+// skill but starts no run (R9 — accepting the assignee default is a
+// content-maintenance gesture), and the outcome reports the bind-only result.
+func TestSkillMentionIssueUpdate_DesignateAssigneeBindsOnly(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	fx := newSkillMentionFixture(t)
+	setIssueAssigneeStatusForTest(t, fx.IssueID, "todo", "agent", fx.OtherAgentID)
+
+	w := updateIssueExpectStatus(t, fx.IssueID, map[string]any{
+		"description": fmt.Sprintf("[@SkillA](mention://skill/%s) please review", fx.SkillID),
+		"skill_mention_agents": map[string][]string{
+			fx.SkillID: {fx.OtherAgentID},
+		},
+	}, http.StatusOK)
+	_, outcomes := decodeUpdateIssueDesignations(t, w)
+
+	if got := countAgentSkillBindingsFor(t, fx.OtherAgentID, fx.SkillID); got != 1 {
+		t.Fatalf("expected designated assignee bound to skillA, got %d bindings", got)
+	}
+	cleanupAgentSkillBinding(t, fx.OtherAgentID, fx.SkillID)
+	if got := countQueuedOrDispatched(t, fx.OtherAgentID, fx.IssueID); got != 0 {
+		t.Fatalf("designating the assignee must not enqueue a run, got %d tasks", got)
+	}
+	o := findDesignationOutcome(outcomes, fx.OtherAgentID)
+	if o == nil || o.Status != "bound" {
+		t.Fatalf("expected bind-only outcome for the assignee designation, got %+v", outcomes)
+	}
+}
+
+// TestSkillMentionIssueUpdate_DesignateNonAssigneeBindsAndTriggers covers AE3:
+// an edit that designates a NON-assignee agent on a todo issue binds that
+// agent and enqueues exactly one run for it (R9), carrying the KTD7 handoff
+// event summary (actor + skill label + "while editing the issue description")
+// and attributed to the editing member. The assignee itself gets no run from
+// a description-only edit.
+func TestSkillMentionIssueUpdate_DesignateNonAssigneeBindsAndTriggers(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	fx := newSkillMentionFixture(t)
+	setIssueAssigneeStatusForTest(t, fx.IssueID, "todo", "agent", fx.JID)
+
+	w := updateIssueExpectStatus(t, fx.IssueID, map[string]any{
+		"description": fmt.Sprintf("[@SkillA](mention://skill/%s) please review", fx.SkillID),
+		"skill_mention_agents": map[string][]string{
+			fx.SkillID: {fx.OtherAgentID},
+		},
+	}, http.StatusOK)
+	_, outcomes := decodeUpdateIssueDesignations(t, w)
+
+	if got := countAgentSkillBindingsFor(t, fx.OtherAgentID, fx.SkillID); got != 1 {
+		t.Fatalf("expected designated non-assignee bound to skillA, got %d bindings", got)
+	}
+	cleanupAgentSkillBinding(t, fx.OtherAgentID, fx.SkillID)
+	if got := countQueuedOrDispatched(t, fx.OtherAgentID, fx.IssueID); got != 1 {
+		t.Fatalf("expected exactly 1 run enqueued for the designated non-assignee, got %d", got)
+	}
+	// KTD7: the designation-triggered run carries the event summary — actor,
+	// skill label, and the edit gesture — never the description body.
+	note, originator := loadDesignationTask(t, fx.OtherAgentID, fx.IssueID)
+	skillName := skillNameForTest(t, fx.SkillID)
+	if !strings.Contains(note, handlerTestName) ||
+		!strings.Contains(note, "@"+skillName) ||
+		!strings.Contains(note, "while editing the issue description") {
+		t.Fatalf("designation run must carry the KTD7 handoff event summary, got %q", note)
+	}
+	if originator != testUserID {
+		t.Fatalf("designation run must be attributed to the editing member; got originator %q, want %q", originator, testUserID)
+	}
+	// A description-only edit does not trigger the assignee.
+	if got := countQueuedOrDispatched(t, fx.JID, fx.IssueID); got != 0 {
+		t.Fatalf("description-only edit must not start an assignee run, got %d tasks", got)
+	}
+	o := findDesignationOutcome(outcomes, fx.OtherAgentID)
+	if o == nil || o.Status != "queued" || o.ReasonCode != "queued" {
+		t.Fatalf("expected queued outcome for the designated non-assignee, got %+v", outcomes)
+	}
+}
+
+// TestSkillMentionIssueUpdate_BacklogDesignationBindsOnly covers R11: on a
+// backlog issue, designating a non-assignee binds but never enqueues.
+func TestSkillMentionIssueUpdate_BacklogDesignationBindsOnly(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	fx := newSkillMentionFixture(t)
+	setIssueAssigneeStatusForTest(t, fx.IssueID, "backlog", "agent", fx.JID)
+
+	w := updateIssueExpectStatus(t, fx.IssueID, map[string]any{
+		"description": fmt.Sprintf("[@SkillA](mention://skill/%s) please review", fx.SkillID),
+		"skill_mention_agents": map[string][]string{
+			fx.SkillID: {fx.OtherAgentID},
+		},
+	}, http.StatusOK)
+	_, outcomes := decodeUpdateIssueDesignations(t, w)
+
+	if got := countAgentSkillBindingsFor(t, fx.OtherAgentID, fx.SkillID); got != 1 {
+		t.Fatalf("expected designated agent bound despite backlog, got %d bindings", got)
+	}
+	cleanupAgentSkillBinding(t, fx.OtherAgentID, fx.SkillID)
+	if got := countQueuedOrDispatched(t, fx.OtherAgentID, fx.IssueID); got != 0 {
+		t.Fatalf("backlog designation must not enqueue, got %d tasks", got)
+	}
+	o := findDesignationOutcome(outcomes, fx.OtherAgentID)
+	if o == nil || o.Status != "bound" {
+		t.Fatalf("expected bind-only outcome for the backlog designation, got %+v", outcomes)
+	}
+}
+
+// TestSkillMentionIssueUpdate_SuppressRunDesignationBindsOnly mirrors the
+// comment path's _SuppressedDesignatedAgentStillBound (KTD6): suppress_run
+// stops the designation run this turn but must not undo the durable bind.
+func TestSkillMentionIssueUpdate_SuppressRunDesignationBindsOnly(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	fx := newSkillMentionFixture(t)
+	setIssueAssigneeStatusForTest(t, fx.IssueID, "todo", "agent", fx.JID)
+
+	w := updateIssueExpectStatus(t, fx.IssueID, map[string]any{
+		"description":  fmt.Sprintf("[@SkillA](mention://skill/%s) please review", fx.SkillID),
+		"suppress_run": true,
+		"skill_mention_agents": map[string][]string{
+			fx.SkillID: {fx.OtherAgentID},
+		},
+	}, http.StatusOK)
+	_, outcomes := decodeUpdateIssueDesignations(t, w)
+
+	if got := countAgentSkillBindingsFor(t, fx.OtherAgentID, fx.SkillID); got != 1 {
+		t.Fatalf("expected designated agent bound despite suppress_run, got %d bindings", got)
+	}
+	cleanupAgentSkillBinding(t, fx.OtherAgentID, fx.SkillID)
+	if got := countQueuedOrDispatched(t, fx.OtherAgentID, fx.IssueID); got != 0 {
+		t.Fatalf("suppressed designation must not enqueue, got %d tasks", got)
+	}
+	o := findDesignationOutcome(outcomes, fx.OtherAgentID)
+	if o == nil || o.Status != "bound" {
+		t.Fatalf("expected bind-only outcome for the suppressed designation, got %+v", outcomes)
+	}
+}
+
+// TestSkillMentionIssueUpdate_ReassignFinalBasisSplit pins R9's final-basis
+// arbitration: one request that reassigns the issue (J → other) AND designates
+// both agents. The designation of the NEW assignee folds into the natural
+// assign run (merged — exactly one run, no designation double-fire, and the
+// natural run carries no handoff note); the designation of the OLD assignee —
+// now a non-assignee — binds and triggers with the KTD7 handoff note.
+func TestSkillMentionIssueUpdate_ReassignFinalBasisSplit(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	fx := newSkillMentionFixture(t)
+	setIssueAssigneeStatusForTest(t, fx.IssueID, "todo", "agent", fx.JID)
+
+	w := updateIssueExpectStatus(t, fx.IssueID, map[string]any{
+		"description":   fmt.Sprintf("[@SkillA](mention://skill/%s) please review", fx.SkillID),
+		"assignee_type": "agent",
+		"assignee_id":   fx.OtherAgentID,
+		"skill_mention_agents": map[string][]string{
+			fx.SkillID: {fx.JID, fx.OtherAgentID},
+		},
+	}, http.StatusOK)
+	_, outcomes := decodeUpdateIssueDesignations(t, w)
+
+	// New assignee: the natural assign run is the ONLY run; the designation
+	// merged into it (no second enqueue), and the bind landed.
+	if got := countQueuedOrDispatched(t, fx.OtherAgentID, fx.IssueID); got != 1 {
+		t.Fatalf("expected exactly 1 run for the new assignee (natural assign run), got %d", got)
+	}
+	if got := countAgentSkillBindingsFor(t, fx.OtherAgentID, fx.SkillID); got != 1 {
+		t.Fatalf("expected new assignee bound to skillA, got %d bindings", got)
+	}
+	cleanupAgentSkillBinding(t, fx.OtherAgentID, fx.SkillID)
+	if note, _ := loadDesignationTask(t, fx.OtherAgentID, fx.IssueID); note != "" {
+		t.Fatalf("the natural assign run must not carry a designation handoff note, got %q", note)
+	}
+	mo := findDesignationOutcome(outcomes, fx.OtherAgentID)
+	if mo == nil || mo.Status != "merged" || mo.ReasonCode != "coalesced" {
+		t.Fatalf("expected merged/coalesced outcome for the new-assignee designation, got %+v", outcomes)
+	}
+
+	// Old assignee (now non-assignee): bound (fixture pre-bound skillA, the
+	// upsert is idempotent) and triggered with the KTD7 handoff note.
+	if got := countQueuedOrDispatched(t, fx.JID, fx.IssueID); got != 1 {
+		t.Fatalf("expected exactly 1 designation run for the old assignee, got %d", got)
+	}
+	if note, _ := loadDesignationTask(t, fx.JID, fx.IssueID); !strings.Contains(note, "while editing the issue description") {
+		t.Fatalf("old-assignee designation run must carry the KTD7 handoff note, got %q", note)
+	}
+	qo := findDesignationOutcome(outcomes, fx.JID)
+	if qo == nil || qo.Status != "queued" {
+		t.Fatalf("expected queued outcome for the old-assignee designation, got %+v", outcomes)
+	}
+}
+
+// TestSkillMentionIssueUpdate_GateBlockedPrivateAgentOthersSurvive covers AE7
+// on the edit path: designating an agent the editor cannot invoke produces NO
+// binding and NO run, surfaces a blocked outcome, and does not abort the
+// admissible co-designation (R15/R16).
+func TestSkillMentionIssueUpdate_GateBlockedPrivateAgentOthersSurvive(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	fx := newSkillMentionFixture(t)
+	privateAgentID, _, _ := privateAgentTestFixture(t)
+	setIssueAssigneeStatusForTest(t, fx.IssueID, "todo", "agent", fx.JID)
+
+	w := updateIssueExpectStatus(t, fx.IssueID, map[string]any{
+		"description": fmt.Sprintf("[@SkillA](mention://skill/%s) please review", fx.SkillID),
+		"skill_mention_agents": map[string][]string{
+			fx.SkillID: {privateAgentID, fx.OtherAgentID},
+		},
+	}, http.StatusOK)
+	_, outcomes := decodeUpdateIssueDesignations(t, w)
+
+	if got := countAgentSkillBindingsFor(t, privateAgentID, fx.SkillID); got != 0 {
+		t.Fatalf("gate-blocked private agent must NOT be bound, got %d bindings", got)
+	}
+	if got := countQueuedOrDispatched(t, privateAgentID, fx.IssueID); got != 0 {
+		t.Fatalf("gate-blocked private agent must NOT be enqueued, got %d tasks", got)
+	}
+	bo := findDesignationOutcome(outcomes, privateAgentID)
+	if bo == nil || bo.Status != "blocked" || bo.ReasonCode != "invocation_not_allowed" {
+		t.Fatalf("expected blocked/invocation_not_allowed outcome for the private agent, got %+v", outcomes)
+	}
+	if got := countAgentSkillBindingsFor(t, fx.OtherAgentID, fx.SkillID); got != 1 {
+		t.Fatalf("expected co-designated admissible agent bound, got %d bindings", got)
+	}
+	cleanupAgentSkillBinding(t, fx.OtherAgentID, fx.SkillID)
+	if got := countQueuedOrDispatched(t, fx.OtherAgentID, fx.IssueID); got != 1 {
+		t.Fatalf("expected co-designated admissible agent enqueued, got %d tasks", got)
+	}
+	qo := findDesignationOutcome(outcomes, fx.OtherAgentID)
+	if qo == nil || qo.Status != "queued" {
+		t.Fatalf("expected queued outcome for the co-designated admissible agent, got %+v", outcomes)
+	}
+}
+
+// TestSkillMentionIssueUpdate_ChipDeletedInEditNotHonored pins the edit-side
+// content coupling: a designation whose skill chip was DELETED from the
+// description in the same edit is silently dropped (no bind, no run, no
+// outcome), because the gate reads the FINAL persisted description.
+func TestSkillMentionIssueUpdate_ChipDeletedInEditNotHonored(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	fx := newSkillMentionFixture(t)
+	// Pre-state: an earlier edit committed BOTH chips.
+	setIssueDescriptionForTest(t, fx.IssueID, fmt.Sprintf(
+		"[@SkillA](mention://skill/%s) and [@SkillB](mention://skill/%s)", fx.SkillID, fx.SecondSkillID))
+	setIssueAssigneeStatusForTest(t, fx.IssueID, "todo", "agent", fx.JID)
+
+	// This edit deletes the skillB chip but still designates J for it.
+	w := updateIssueExpectStatus(t, fx.IssueID, map[string]any{
+		"description": fmt.Sprintf("[@SkillA](mention://skill/%s) only this one", fx.SkillID),
+		"skill_mention_agents": map[string][]string{
+			fx.SkillID:       {fx.OtherAgentID},
+			fx.SecondSkillID: {fx.JID},
+		},
+	}, http.StatusOK)
+	_, outcomes := decodeUpdateIssueDesignations(t, w)
+
+	// Deleted-chip designation: dropped silently — J is not bound to skillB,
+	// gets no run, and collects no outcome.
+	if got := countAgentSkillBindingsFor(t, fx.JID, fx.SecondSkillID); got != 0 {
+		t.Fatalf("designation whose chip was deleted mid-edit must not bind, got %d bindings", got)
+	}
+	if got := countQueuedOrDispatched(t, fx.JID, fx.IssueID); got != 0 {
+		t.Fatalf("designation whose chip was deleted mid-edit must not enqueue, got %d tasks", got)
+	}
+	if o := findDesignationOutcome(outcomes, fx.JID); o != nil {
+		t.Fatalf("designation whose chip was deleted mid-edit must be silent, got outcome %+v", *o)
+	}
+	// The surviving chip's designation still binds and triggers.
+	if got := countAgentSkillBindingsFor(t, fx.OtherAgentID, fx.SkillID); got != 1 {
+		t.Fatalf("expected surviving-chip designation bound, got %d bindings", got)
+	}
+	cleanupAgentSkillBinding(t, fx.OtherAgentID, fx.SkillID)
+	if got := countQueuedOrDispatched(t, fx.OtherAgentID, fx.IssueID); got != 1 {
+		t.Fatalf("expected surviving-chip designation enqueued, got %d tasks", got)
+	}
+}
+
+// TestSkillMentionIssueUpdate_PendingDesignationMerges pins the review-M3
+// pending guard on the edit path: when an (issue, agent) task is already
+// pending, the designation folds into it — no second enqueue, merged outcome,
+// binding still written.
+func TestSkillMentionIssueUpdate_PendingDesignationMerges(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	fx := newSkillMentionFixture(t)
+	setIssueAssigneeStatusForTest(t, fx.IssueID, "todo", "", "")
+
+	// Pre-existing pending run for (issue, other) — e.g. an earlier mention.
+	if _, err := testHandler.TaskService.EnqueueTaskForMentionWithActor(
+		ctx, fx.Issue, parseUUID(fx.OtherAgentID), "", parseUUID(testUserID)); err != nil {
+		t.Fatalf("seed pending task: %v", err)
+	}
+
+	w := updateIssueExpectStatus(t, fx.IssueID, map[string]any{
+		"description": fmt.Sprintf("[@SkillA](mention://skill/%s) please review", fx.SkillID),
+		"skill_mention_agents": map[string][]string{
+			fx.SkillID: {fx.OtherAgentID},
+		},
+	}, http.StatusOK)
+	_, outcomes := decodeUpdateIssueDesignations(t, w)
+
+	if got := countQueuedOrDispatched(t, fx.OtherAgentID, fx.IssueID); got != 1 {
+		t.Fatalf("pending guard must prevent a second enqueue, got %d tasks", got)
+	}
+	if got := countAgentSkillBindingsFor(t, fx.OtherAgentID, fx.SkillID); got != 1 {
+		t.Fatalf("expected designated agent bound despite the merge, got %d bindings", got)
+	}
+	cleanupAgentSkillBinding(t, fx.OtherAgentID, fx.SkillID)
+	o := findDesignationOutcome(outcomes, fx.OtherAgentID)
+	if o == nil || o.Status != "merged" || o.ReasonCode != "coalesced" {
+		t.Fatalf("expected merged/coalesced outcome for the pending designation, got %+v", outcomes)
+	}
+}
+
+// TestSkillMentionIssueUpdate_SquadLeaderDesignationBindsOnly pins the
+// edit-side squad equivalence (review M3): when the final assignee is a squad,
+// designating its leader is an assignee designation — bind only, never a
+// designation run — even when NO natural leader run is pending (a
+// description-only edit starts none).
+func TestSkillMentionIssueUpdate_SquadLeaderDesignationBindsOnly(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	fx := newSkillMentionFixture(t)
+
+	var squadID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO squad (workspace_id, name, description, leader_id, creator_id)
+		VALUES ($1, $2, '', $3, $4)
+		RETURNING id
+	`, testWorkspaceID, "Designation Edit Squad "+t.Name(), fx.JID, testUserID).Scan(&squadID); err != nil {
+		t.Fatalf("create squad: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM squad WHERE id = $1`, squadID)
+	})
+	setIssueAssigneeStatusForTest(t, fx.IssueID, "todo", "squad", squadID)
+
+	w := updateIssueExpectStatus(t, fx.IssueID, map[string]any{
+		"description": fmt.Sprintf("[@SkillB](mention://skill/%s) take this", fx.SecondSkillID),
+		"skill_mention_agents": map[string][]string{
+			fx.SecondSkillID: {fx.JID},
+		},
+	}, http.StatusOK)
+	_, outcomes := decodeUpdateIssueDesignations(t, w)
+
+	if got := countAgentSkillBindingsFor(t, fx.JID, fx.SecondSkillID); got != 1 {
+		t.Fatalf("expected squad leader bound to skillB, got %d bindings", got)
+	}
+	cleanupAgentSkillBinding(t, fx.JID, fx.SecondSkillID)
+	if got := countQueuedOrDispatched(t, fx.JID, fx.IssueID); got != 0 {
+		t.Fatalf("leader designation with no pending leader run must NOT enqueue, got %d tasks", got)
+	}
+	o := findDesignationOutcome(outcomes, fx.JID)
+	if o == nil || o.Status != "bound" {
+		t.Fatalf("expected bind-only outcome for the squad-leader designation, got %+v", outcomes)
+	}
+}
+
+// TestSkillMentionIssueUpdate_DesignationOnlyUpdateHonored pins the server
+// half of AE8: an update that carries ONLY skill_mention_agents (no
+// description field — the chip was committed by an earlier autosave) is gated
+// against the persisted description and honored.
+func TestSkillMentionIssueUpdate_DesignationOnlyUpdateHonored(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	fx := newSkillMentionFixture(t)
+	setIssueDescriptionForTest(t, fx.IssueID, fmt.Sprintf("[@SkillA](mention://skill/%s) please review", fx.SkillID))
+	setIssueAssigneeStatusForTest(t, fx.IssueID, "todo", "agent", fx.JID)
+
+	w := updateIssueExpectStatus(t, fx.IssueID, map[string]any{
+		"skill_mention_agents": map[string][]string{
+			fx.SkillID: {fx.OtherAgentID},
+		},
+	}, http.StatusOK)
+	_, outcomes := decodeUpdateIssueDesignations(t, w)
+
+	if got := countAgentSkillBindingsFor(t, fx.OtherAgentID, fx.SkillID); got != 1 {
+		t.Fatalf("expected designation-only update to bind, got %d bindings", got)
+	}
+	cleanupAgentSkillBinding(t, fx.OtherAgentID, fx.SkillID)
+	if got := countQueuedOrDispatched(t, fx.OtherAgentID, fx.IssueID); got != 1 {
+		t.Fatalf("expected designation-only update to enqueue, got %d tasks", got)
+	}
+	o := findDesignationOutcome(outcomes, fx.OtherAgentID)
+	if o == nil || o.Status != "queued" {
+		t.Fatalf("expected queued outcome for the designation-only update, got %+v", outcomes)
+	}
+}
