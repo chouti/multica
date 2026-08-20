@@ -1,6 +1,6 @@
 ---
 name: multica-mentioning
-description: "Use when an issue comment needs to @mention someone — link to a person, trigger another agent, hand work to a squad, broadcast with @all, or designate an agent via @skill. Documents the verified mention contract: how a mention link is built from a real UUID, what each mention type enqueues (agent → a run for that agent, squad → a run for the squad leader, member and issue → a rendered link with NO run, skill → a run ONLY for agents the frontend EXPLICITLY designated in `skill_mention_agents`; undesignated @skill = silent no-op), and the guard outcomes for a parsed mention (blocked with an enumeration-safe reason_code, coalesced/deferred into a pending task, or a true silent no-op). Whether to mention at all is covered by the runtime brief, not here. This skill is the backend contract only, traced to server/internal/util/mention.go and server/internal/handler/comment.go."
+description: "Designate an agent to apply a skill when commenting on or creating/editing an issue. The agent picks up the skill and runs it asynchronously; you get an inbox notification when done."
 user-invocable: false
 allowed-tools: Bash(multica *)
 ---
@@ -15,6 +15,56 @@ do not repeat it here.
 Every claim below is pinned to source in
 `references/mentioning-source-map.md`. If behavior ever differs from this
 document, the source map is where to re-check it.
+
+## Scope — where the `@skill` designation gesture is available
+
+`@skill` designation (a chip in the composer + a non‑empty `skill_mention_agents`
+entry) is a verified backend gesture on three surfaces:
+
+- **Issue comment composer** (CommentInput / ReplyInput) — the original surface.
+  See Step 3.
+- **Issue creation modal — manual mode description editor** (new in this
+  cluster, fork-only). On submit, the durable `agent_skill` bind lands in the
+  create transaction (R6, KTD2) and each designated agent is enqueued via the
+  same gate + outcome surface the comment path uses, except when the
+  designation targets the issue's own assignee (`DispatchMerged`, R7) or the
+  new issue is parked in backlog (`DispatchBound`, R8). Traced to
+  `gateIssueSkillDesignations`, `applyCreateIssueSkillDesignations`, and the
+  in-transaction `IssueCreateParams.SkillDesignations` loop in
+  `server/internal/service/issue.go`. Outcomes return on
+  `issue.skill_designation_outcomes`.
+- **Issue edit-mode description editor** (new in this cluster, fork-only). On
+  update, the bind is post-commit best-effort and the enqueue is split on the
+  post-update assignee: designating the current assignee produces
+  `DispatchBound` (no run, R9); designating a non-assignee agent on a non-
+  backlog, non-`SuppressRun` issue produces `DispatchQueued` carrying the skill
+  (R9, R11, KTD6). The handoff note reused from the comment path
+  (`issueSkillDesignationHandoffNote`) labels the run as a designation event
+  without rewriting the user's free-text handoff field (KTD7). Traced to
+  `bindIssueSkillDesignations`, `applyUpdateIssueSkillDesignations`, and
+  `issueSkillDesignationHandoffNote` in `server/internal/handler/issue.go`.
+
+The gesture is deliberately **not** available on:
+
+- **Agent-mode prompt panel** in the issue creation modal — the panel already
+  speaks to one designated actor, so a skill chip in it would re‑route to
+  that same actor and add no information. The `@` menu strips the skill entry
+  and the manual→agent mode-switch seed rewrites any pre‑existing skill chips
+  in the description back to plain text (KD5).
+- **CLI or programmatic issue creation/update** — there is no
+  `--skill-mention-agents` flag on `multica issue create`/`update`; an API
+  call without `skill_mention_agents` is the same silent no-op the comment
+  path documents (R12, comment path Step 3).
+
+Frontend pipeline: the shared engine in
+`packages/views/issues/hooks/use-skill-auto-bind.ts` + `use-skill-mention-auto-open.ts`
++ `use-recommended-skill-agent.ts` runs in both description editors; the
+auto-bind context provider
+(`packages/views/editor/skill-mention-context.ts`) mounts under each
+`ContentEditor` mount point (`packages/views/modals/create-issue.tsx` and
+`packages/views/issues/components/issue-detail.tsx`). The agent-picker
+popover (`packages/views/editor/skill-agent-picker.tsx`) is the same UI as the
+comment path.
 
 ## A mention link is built from a real UUID
 
@@ -140,6 +190,85 @@ CLI does not currently expose a way to author a `skill_mention_agents` map —
 that is a composer-only gesture. When it eventually lands, the value must be
 the agent's `id` from `multica agent list --output json` (the same field the
 direct `@agent` mention uses).
+
+## Step 4 — `@skill` designation on the issue description editor (create + edit)
+
+The same gesture extends to the description editor of the issue creation modal
+(manual mode only — agent-mode prompt panel deliberately strips skill chips,
+see Scope) and the issue edit-mode description editor. The composer carries
+the same `skill_mention_agents` map alongside the request, and the backend
+mirrors the comment path's gate set (R15) plus the create/edit-specific
+split:
+
+  - the `agent_skill` row is upserted (`UpsertAgentSkillEnabled`, TOCTOU-
+    closed, idempotent, enabled=TRUE);
+  - each designated agent passes the same gate the comment path uses —
+    invocable (`canInvokeAgent`, not `canAccessPrivateAgent` — see-vs-run
+    split from MUL-3963), unarchived, runtime-bound. A gate-failed agent
+    never binds and never enqueues; it returns a `DispatchBlocked` outcome
+    with the same enumeration-safe `reason_code` the comment path uses
+    (`ReasonInvocationNotAllowed` for unknown / not-invoke-able /
+    cross-workspace, `ReasonTargetUnavailable` for archived, `ReasonRuntimeOffline`
+    for missing runtime). A failure does not abort the other designations.
+
+On the **create** path:
+
+  - The `agent_skill` rows for every gate-admitted pair land in the create
+    transaction, alongside the issue row and the labels. The post-create
+    half (`applyCreateIssueSkillDesignations` in
+    `server/internal/handler/issue.go`) then walks the distinct designated
+    agents and decides the run outcome:
+    - Designation targets the issue's own assignee agent AND the create's
+      natural enqueue produced a task (`AssignedTaskID`) → `DispatchMerged`,
+      no second enqueue (R7, KTD3). Exactly one run, already carrying the
+      skill.
+    - Issue is parked in `backlog` → `DispatchBound`, no enqueue (R8). The
+      bind stands; the run starts when the issue leaves backlog.
+    - A pending (issue, agent) task already exists (natural squad-leader run
+      or concurrent duplicate) → `DispatchMerged`, no enqueue.
+    - Otherwise → enqueue directly via `EnqueueTaskForMentionWithActor` with
+      the creating member as the accountable human (KTD4).
+
+On the **edit** path:
+
+  - The bind is post-commit best-effort, sequenced before any enqueue
+    (`bindIssueSkillDesignations` in `server/internal/handler/issue.go`,
+    KTD2 edit-side contract).
+  - The post-update split (`applyUpdateIssueSkillDesignations`) walks the
+    distinct designated agents and decides per the post-update assignee:
+    - Designation targets the post-update assignee (the user accepted the
+      auto-fill default or explicitly picked the assignee) →
+      `DispatchBound`, no run (R9). The skill is pre-installed for
+      future runs; nothing fires now.
+    - Designation targets a non-assignee agent AND the issue is non-backlog
+      AND `SuppressRun` is false → enqueue via
+      `EnqueueTaskForMentionWithActor` with the editor as the accountable
+      human, producing `DispatchQueued` and stamping a KTD7 handoff note
+      (`issueSkillDesignationHandoffNote`).
+    - Designation targets a non-assignee agent BUT the issue is `backlog`
+      OR `SuppressRun` is true → `DispatchBound`, no run (R11, KTD6). The
+      bind stands; the run starts when the issue leaves backlog / the
+      suppression is lifted.
+
+The `SuppressRun` flag carries its prior meaning (it already suppresses the
+natural assignee enqueue on update) and additionally suppresses
+designation-triggered runs on non-assignee agents in this update — the bind
+is unaffected (per `_SuppressedDesignatedAgentStillBound` precedent from the
+comment path).
+
+The post-create / post-update outcomes are returned to the client on
+`IssueResponse.SkillDesignationOutcomes` (a slice of `IssueSkillDesignationOutcome`
+with `status` ∈ `queued` / `bound` / `merged` / `blocked` and the same
+`reason_code` vocabulary the comment `trigger_outcomes` uses). The same
+shape lets the frontend render bind-only / blocked feedback with one toast
+component (R13, R16).
+
+CLI does not currently expose `skill_mention_agents` on `multica issue
+create` or `multica issue update` either — same CLI gap as the comment
+composer, same composer-only-gesture contract. When the flag eventually
+lands, the value must be the agent's `id` from
+`multica agent list --output json` (same field as the direct `@agent`
+mention and as the comment composer).
 
 ## Preview and per-comment suppression
 
@@ -287,6 +416,8 @@ still parses (which is why the type must match the id source).
 ## References
 
 `references/mentioning-source-map.md` — file:line evidence for the regex, the
-enqueue branches, the @all suppression, and the CLI id-source mapping, plus the
-explicit note that no member-notification delivery path exists in the Go
-comment handler.
+comment-path enqueue branches, the issue-path create/edit gate and split
+(see the "Issue-path `@skill` designation (create + edit)" section), the @all
+suppression, the CLI id-source mapping, and the unified dispatch outcome
+contract (DispatchStatus / DispatchReasonCode), plus the explicit note that
+no member-notification delivery path exists in the Go comment handler.

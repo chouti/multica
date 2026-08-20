@@ -67,6 +67,46 @@ each designated agent to the skill (idempotent) and enqueues it.
 | Frontend trigger-chip label switches for `mention_skill` and `thread_parent` (so chips don't fall through to the unknown-source "trigger" label) | `packages/views/issues/components/comment-trigger-chips.tsx:51-78` |
 | i18n keys `trigger_source_mention_skill` and `trigger_source_thread_parent` (en/zh-Hans/ja/ko parity) | `packages/views/locales/en/issues.json:316-321`, `packages/views/locales/zh-Hans/issues.json:307-312`, `packages/views/locales/ja/issues.json:307-312`, `packages/views/locales/ko/issues.json:307-312` |
 
+## Issue-path `@skill` designation (create + edit)
+
+Fork-only extension of the comment-path `@skill` gesture to the issue
+description editor. The frontend submits the same `skill_mention_agents`
+map; the backend reuses `parseSkillMentionAgents` for boundary validation
+(per-skill 8 / total-map 16 caps, identical to the comment path) and emits
+outcomes through the unified dispatch vocabulary
+(`DispatchStatus` / `DispatchReasonCode` in `server/internal/handler/admission.go`,
+aliased from `server/internal/dispatch`). The comment-path gate set is the
+gate set here: `canInvokeAgent` (see-vs-run split), archived, runtime-bound
+— and the same enumeration-safe `reason_code` is returned on refusal.
+
+| Fact | Source |
+| --- | --- |
+| Shared boundary parser for `skill_mention_agents` (per-skill 8 / map 16 caps); reused unchanged for the issue path | `server/internal/handler/handler.go:579-612` (`parseSkillMentionAgents`) |
+| Unified dispatch outcome enum (`queued` / `coalesced` / `deferred` / `bound` / `merged` / `blocked`) + reason-code vocabulary (aliased from `server/internal/dispatch`) | `server/internal/handler/admission.go:28-75` |
+| Issue-path outcome type carried on `IssueResponse.SkillDesignationOutcomes` | `server/internal/handler/issue.go:81-87` (`SkillDesignationOutcomes` field) + `server/internal/handler/issue.go:90-103` (`IssueSkillDesignationOutcome` shape) |
+| `IssueSkillDesignationOutcome` builder (`IssueCreateResponse.SkillDesignationOutcomes = designationOutcomes`) and `IssueUpdateResponse` mirroring | `server/internal/handler/issue.go:3065` (create response), `server/internal/handler/issue.go:3955-3956` (update response) |
+| Create request DTO: `CreateIssueRequest.SkillMentionAgents` (raw map, validated at the boundary) | `server/internal/handler/issue.go:2728-2735` (field decl), `server/internal/handler/issue.go:2760` (parse call) |
+| Update request DTO: `UpdateIssueRequest.SkillMentionAgents` (same shape) | `server/internal/handler/issue.go:3466-3473` (field decl), `server/internal/handler/issue.go:3642` (parse call) |
+| Service-layer container for the in-transaction bind: `IssueCreateParams.SkillDesignations` (handler-pre-gated; permission-free for this layer) | `server/internal/service/issue.go:83-91` (field), `server/internal/service/issue.go:377-389` (in-transaction `UpsertAgentSkillEnabled` loop) |
+| Pre-create gate: workspace resolution, description content coupling, invoke/archived/runtime checks per agent; mirrors comment-path gate set (R15); returns admitted map + blocked outcomes | `server/internal/handler/issue.go:3069-3160` (`gateIssueSkillDesignations`) |
+| Pre-update gate call site (re-uses the same function as create; same actor fields pulled from the update request via `invokeOriginatorFromRequest`) | `server/internal/handler/issue.go:3887-3894` |
+| Post-create split (R7/R8/pending-merge + `EnqueueTaskForMentionWithActor` fallback per agent); folded blocked outcomes | `server/internal/handler/issue.go:3162-3245` (`applyCreateIssueSkillDesignations`) |
+| Post-update bind (post-commit best-effort, sequenced before any enqueue; single-row upsert; per-pair failure logged + skipped) | `server/internal/handler/issue.go:3247-3273` (`bindIssueSkillDesignations`) |
+| Post-update split (R9/R11/KTD6: bind-only for post-update assignee, backlog or `SuppressRun`; otherwise enqueue + handoff note) | `server/internal/handler/issue.go:3275-3386` (`applyUpdateIssueSkillDesignations`) |
+| KTD7 handoff note builder (event summary; does not rewrite user's free-text handoff field) | `server/internal/handler/issue.go:3388-3409` (`issueSkillDesignationHandoffNote`) |
+| Enqueue leaf used by both create and edit paths: `EnqueueTaskForMentionWithActor` (explicit agent id, no trigger comment, member actor as accountable human) | `server/internal/service/task.go:1186-…` (`EnqueueTaskForMentionWithActor`); pending-task unique index `idx_one_pending_task_per_issue_agent_v2` from migration 257 (v1 dropped by migration 258) |
+| Shared pending-task helper that protects the post-update split from a race with the natural enqueue | `server/internal/handler/comment.go` (search `hasPendingTaskForIssueAndAgent`, reused unchanged on the issue side) |
+| Private-agent invoke gate (see-vs-run split, MUL-3963) — same predicate as the comment path; runs BEFORE any archived/runtime state is read so a caller who may not invoke the target never learns its state | `server/internal/handler/agent_access.go:48` (`canInvokeAgent`) |
+| Frontend shared engine: auto-open popover + auto-bind + sticky recommendation; reused unchanged by the description editor | `packages/views/issues/hooks/use-skill-mention-auto-open.ts` + `packages/views/issues/hooks/use-skill-auto-bind.ts` + `packages/views/issues/hooks/use-recommended-skill-agent.ts` |
+| Frontend designation-context provider (mounts under each `ContentEditor` so the shared engine has the workspace/issue context it needs) | `packages/views/editor/skill-mention-context.ts` (provider), `packages/views/editor/skill-agent-picker.tsx` (popover), `packages/views/editor/extensions/mention-suggestion.tsx` (chip + auto-open wiring) |
+| Create-modal mount point for the description editor (manual mode only) | `packages/views/modals/create-issue.tsx:864-874` (ContentEditor) |
+| Edit-mode mount point for the description editor | `packages/views/issues/components/issue-detail.tsx:2728-2768` (ContentEditor in the description panel) |
+| Submit pipeline (create): the create mutation carries `skill_mention_agents` and the `updateIssue` response schema parses `skill_designation_outcomes`; `CreateIssueSchema` accepts the optional map (empty map = no field on the wire) | `packages/core/types/api.ts` (request types), `packages/core/api/client.ts` (`createIssue`/`updateIssue` + zod schemas), `packages/core/issues/mutations.ts` (control-field strip list now includes `skill_mention_agents`, alongside `suppress_run`) |
+| Submit pipeline (edit): `useUpdateIssue` payload assembly + `onSuccess` consumer (KTD1 single-shot) | `packages/core/issues/mutations.ts:111-124, :204-224`, `packages/views/issues/components/issue-detail.tsx` (onUpdate接入 :2754-2758 + onSuccess 消费 + 触碰-only 触发器 per R10) |
+| Draft persistence: `skillMentionAgents` + touched/filled guards persisted with `multica_issue_draft` so reload doesn't drop pending designations (KTD8); mirrors `CommentDraftPayload.touchedSkillIds` / `filledSkillIds` from the comment path | `packages/core/issues/stores/draft-store.ts` |
+| Run-hint client-side designation row ("将携带 skill 运行" / "只绑定不运行") covers the server preview-not-extended gap (KTD8/KTD9) | `packages/views/modals/create-issue.tsx` (CreateRunHint 扩展) |
+| Non-block feedback: bind-only + blocked aggregated toasts; unresolved-designation disclosure band (R14) | `packages/views/issues/actions/use-issue-actions.ts` (onSuccess 钩子位) + 编辑态提示组件 |
+
 ## Preview and suppression
 
 | Fact | Source |

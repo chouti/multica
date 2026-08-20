@@ -144,6 +144,135 @@ func TestMentioningSkillFollowsContractFrontmatter(t *testing.T) {
 	}
 }
 
+// TestMentioningSkillCoversIssuePathContracts pins the fork-only extension
+// of the @skill designation gesture to the issue description editor. The
+// "Scope" section must list the three surfaces (create / edit / comment) and
+// call out the deliberate non-applicability on agent-mode and CLI; the new
+// "Step 4" section must cover the create-path bind-in-transaction, the
+// post-create split (DispatchMerged for the assignee, DispatchBound for
+// backlog, DispatchQueued otherwise), and the post-update split
+// (bind-only for assignee, bind + enqueue for non-assignee, backlog and
+// SuppressRun suppress the enqueue). If any of these leave the skill, the
+// surface contract drifts and clients lose the floor on bind-only vs will-run.
+func TestMentioningSkillCoversIssuePathContracts(t *testing.T) {
+	skill, ok := findSkill(t, "multica-mentioning")
+	if !ok {
+		return
+	}
+	_, body, _ := splitFrontmatter(skill.Content)
+
+	mustContain := []string{
+		// Scope: surfaces
+		"## Scope — where the `@skill` designation gesture is available",
+		"Issue comment composer",
+		"Issue creation modal — manual mode description editor",
+		"Issue edit-mode description editor",
+		// Scope: deliberate non-applicability
+		"Agent-mode prompt panel",
+		"CLI or programmatic issue creation/update",
+		// Step 4 anchors
+		"## Step 4 — `@skill` designation on the issue description editor (create + edit)",
+		"`gateIssueSkillDesignations`",
+		"`applyCreateIssueSkillDesignations`",
+		"create transaction",
+		"`bindIssueSkillDesignations`",
+		"`applyUpdateIssueSkillDesignations`",
+		"`issueSkillDesignationHandoffNote`",
+		"`EnqueueTaskForMentionWithActor`",
+		// Outcome vocabulary that must be reachable from the body
+		"DispatchMerged",
+		"DispatchBound",
+		"DispatchQueued",
+		"DispatchBlocked",
+		// R7/R8/R9/R11 anchors — these are the load-bearing one-liners clients
+		// rely on to tell "will run" from "bound-only".
+		"designation targets the issue's own assignee",
+		"backlog",
+		"`SuppressRun`",
+		// CLI gap note must cover the issue path too (the note points at the
+		// `multica issue create`/`update` slash-flag shape so the gap is
+		// searchable when CLI parity lands).
+		"`multica issue create`/`update`",
+		// Source-map reference must survive in the References block so the
+		// source-map can be kept in sync.
+		"references/mentioning-source-map.md",
+	}
+	for _, want := range mustContain {
+		if !strings.Contains(body, want) {
+			t.Errorf("mentioning skill missing issue-path contract anchor %q", want)
+		}
+	}
+
+	mustNotContain := []string{
+		// The mentioning skill is a backend contract, not a how-to
+		// guide. The issue-path extension inherits that discipline — a
+		// "how to bind" playbook in this skill would duplicate the
+		// composer-side UX teaching that already lives in
+		// use-skill-auto-bind.ts and the comment-card surface.
+		"Click the picker to choose an agent",
+		"Open the popover and select",
+	}
+	for _, forbidden := range mustNotContain {
+		if strings.Contains(body, forbidden) {
+			t.Errorf("mentioning skill should not teach UX coaching %q", forbidden)
+		}
+	}
+
+	if !skillHasFile(skill, "references/mentioning-source-map.md") {
+		t.Errorf("mentioning skill missing supporting file references/mentioning-source-map.md")
+	}
+}
+
+// TestMentioningSkillSourceMapPinsIssuePath verifies the source-map actually
+// carries the issue-path section referenced from SKILL.md. If the section
+// goes missing, the body contract in SKILL.md becomes a lie (no file:line
+// evidence behind it). Anchors are picked so each row of the source-map
+// table is reachable.
+func TestMentioningSkillSourceMapPinsIssuePath(t *testing.T) {
+	skill, ok := findSkill(t, "multica-mentioning")
+	if !ok {
+		return
+	}
+	var src string
+	for _, f := range skill.Files {
+		if f.Path == "references/mentioning-source-map.md" {
+			src = f.Content
+			break
+		}
+	}
+	if src == "" {
+		t.Fatalf("references/mentioning-source-map.md not present in skill payload")
+	}
+
+	mustContain := []string{
+		"## Issue-path `@skill` designation (create + edit)",
+		"parseSkillMentionAgents",
+		"gateIssueSkillDesignations",
+		"applyCreateIssueSkillDesignations",
+		"bindIssueSkillDesignations",
+		"applyUpdateIssueSkillDesignations",
+		"issueSkillDesignationHandoffNote",
+		"EnqueueTaskForMentionWithActor",
+		"IssueCreateParams.SkillDesignations",
+		"UpsertAgentSkillEnabled",
+		"canInvokeAgent",
+		"DispatchStatus",
+		"DispatchReasonCode",
+		"use-skill-auto-bind.ts",
+		"use-skill-mention-auto-open.ts",
+		"use-recommended-skill-agent.ts",
+		"skill-mention-context.ts",
+		"skill-agent-picker.tsx",
+		"create-issue.tsx",
+		"issue-detail.tsx",
+	}
+	for _, want := range mustContain {
+		if !strings.Contains(src, want) {
+			t.Errorf("mentioning source-map missing issue-path anchor %q", want)
+		}
+	}
+}
+
 // TestMentioningSkillTeachesTheParserContract is the eval that gives the skill
 // its value: it proves the skill teaches exactly what util.ParseMentions
 // enforces. The skill's "Incorrect" examples must parse to nothing (the
