@@ -1466,9 +1466,9 @@ type CreateCommentRequest struct {
 }
 
 type CommentTriggerPreviewRequest struct {
-	Content          string   `json:"content"`
-	ParentID         *string  `json:"parent_id"`
-	EditingCommentID *string  `json:"editing_comment_id"`
+	Content          string  `json:"content"`
+	ParentID         *string `json:"parent_id"`
+	EditingCommentID *string `json:"editing_comment_id"`
 	// SkillMentionAgents matches the create-comment contract (skill mention ID
 	// → designated agent IDs). The preview is read-only: it accepts the field so
 	// the client can send one shape, but it never binds or routes on skills — a
@@ -3518,9 +3518,9 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Content            string            `json:"content"`
-		AttachmentIDs      *[]string         `json:"attachment_ids"`
-		SuppressAgentIDs   []string          `json:"suppress_agent_ids"`
+		Content            string              `json:"content"`
+		AttachmentIDs      *[]string           `json:"attachment_ids"`
+		SuppressAgentIDs   []string            `json:"suppress_agent_ids"`
 		SkillMentionAgents map[string][]string `json:"skill_mention_agents"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {

@@ -4406,7 +4406,7 @@ func retryDelayForAttempt(reason string, failedAttempt int32) time.Duration {
 
 func resumeUnsafeFailureReason(reason string) bool {
 	switch reason {
-// Failures that poison the agent CONVERSATION (not the workdir): resuming
+	// Failures that poison the agent CONVERSATION (not the workdir): resuming
 	// the same session would immediately replay the stuck/oversized state.
 	// Keep in sync with the GetLastTaskSession / GetLastChatTaskSession resume
 	// blacklists. (CreateRetryTask's fresh-session CASE WHEN only needs the
