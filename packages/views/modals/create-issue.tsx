@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect, useLayoutEffect } from "react";
+import { useState, useRef, useEffect, useLayoutEffect, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { AppLink, resolveClickIntent, useNavigation } from "../navigation";
 import {
@@ -56,7 +56,7 @@ import { ShortcutKeycaps } from "../common/shortcut-keycaps";
 import { StatusIcon, StatusPicker, PriorityIcon, PriorityPicker, StagePicker, AssigneePicker, StartDatePicker, DueDatePicker, LabelPicker } from "../issues/components";
 import { maxSiblingStage } from "../issues/components/pickers/stage-picker";
 import { ProjectPicker } from "../projects/components/project-picker";
-import { useIssueTriggerPreview } from "../issues/hooks/use-issue-trigger-preview";
+import { CreateRunHint, type SkillDesignationHint } from "../issues/components/create-run-hint";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -65,6 +65,8 @@ import { useCreateModeStore } from "@multica/core/issues/stores/create-mode-stor
 import { useQuickCreateStore } from "@multica/core/issues/stores/quick-create-store";
 import { stripSkillMentionMarkdown } from "../issues/utils/strip-mention-markdown";
 import { useSkillAutoBind } from "../issues/hooks/use-skill-auto-bind";
+import { mentionLabelsByTarget, parseIssueSkillDesignationOutcomes } from "@multica/core/issues/comment-trigger-outcomes";
+import { surfaceDesignationOutcomes } from "../issues/utils/skill-designation-toasts";
 import {
   useIssueCreateSettingsStore,
   type ManualCreateField,
@@ -84,7 +86,6 @@ import {
 } from "@multica/core/api";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import { ClearablePillButton, PillButton } from "../common/pill-button";
-import { ActorAvatar } from "../common/actor-avatar";
 import { PropertyIcon } from "../common/property-icon";
 import {
   CustomPropertyValueDisplay,
@@ -100,96 +101,6 @@ import { useT } from "../i18n";
 // remounting the Dialog Root (no overlay flash). `onSwitchMode` flips the
 // shell's local mode state.
 // ---------------------------------------------------------------------------
-
-// CreateRunHint is the create modal's passive pre-trigger label (MUL-3375 §4):
-// whether saving will start a run, driven by the unified backend predicate
-// (preview, isCreate) — never a frontend guess. No dialog, no blocking.
-//
-// Visually it borrows the comment header's avatar+text line, minus the
-// interactivity — purely a caption, never a link/hover-card. It renders its own
-// reveal band (a grid 0fr→1fr collapse) so it sits on a dedicated row above the
-// property toolbar without reflowing anything: collapsed it is 0px (the flex-1
-// editor absorbs the delta), and it expands only once the predicate resolves,
-// animating straight to the correct copy.
-function CreateRunHint({
-  assigneeType,
-  assigneeId,
-  status,
-}: {
-  assigneeType?: IssueAssigneeType;
-  assigneeId?: string;
-  status: IssueStatus;
-}) {
-  const { t } = useT("modals");
-  const { getActorName } = useActorName();
-  const isAgentLike = assigneeType === "agent" || assigneeType === "squad";
-  const preview = useIssueTriggerPreview({
-    isCreate: true,
-    assigneeType: assigneeType ?? null,
-    assigneeId: assigneeId ?? null,
-    status,
-    enabled: isAgentLike && !!assigneeId,
-  });
-
-  // Reveal only after the predicate resolves so the band animates to the final
-  // copy instead of flashing "parked" before the run preview lands.
-  const ready = isAgentLike && !!assigneeId && !preview.isLoading;
-  const willStart = preview.totalCount > 0;
-  const isSquad = assigneeType === "squad";
-  const triggerAgentId = preview.triggers[0]?.agent_id ?? assigneeId;
-
-  // Avatar + copy mirror the flow. A squad doesn't "work" — its leader
-  // evaluates and delegates — so the squad path keeps the squad as the subject
-  // (avatar + name) and uses the leader-delegates copy. A single agent picks
-  // the issue up directly; a parked issue shows whoever it was assigned to.
-  let avatarType: string;
-  let avatarId: string | undefined;
-  let text: string;
-  if (!willStart) {
-    avatarType = assigneeType ?? "agent";
-    avatarId = assigneeId;
-    text = t(($) => $.run_confirm.create_parked);
-  } else if (isSquad) {
-    avatarType = "squad";
-    avatarId = assigneeId;
-    text = t(($) => $.run_confirm.create_will_start_squad, {
-      name: getActorName("squad", assigneeId ?? ""),
-    });
-  } else {
-    avatarType = "agent";
-    avatarId = triggerAgentId;
-    text = t(($) => $.run_confirm.create_will_start, {
-      name: getActorName("agent", triggerAgentId ?? assigneeId ?? ""),
-    });
-  }
-
-  return (
-    <div
-      className={cn(
-        "grid shrink-0 transition-[grid-template-rows] duration-200 ease-out motion-reduce:transition-none",
-        ready ? "grid-rows-[1fr]" : "grid-rows-[0fr]",
-      )}
-      aria-hidden={!ready}
-    >
-      <div className="overflow-hidden">
-        <div
-          aria-live="polite"
-          className="flex items-center gap-1.5 px-4 pb-1 pt-0.5 text-micro text-muted-foreground"
-        >
-          {avatarId && (
-            <ActorAvatar
-              actorType={avatarType}
-              actorId={avatarId}
-              size="sm"
-              profileLink={false}
-            />
-          )}
-          <span className="truncate">{text}</span>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 export function ManualCreatePanel({
   onClose,
@@ -209,11 +120,13 @@ export function ManualCreatePanel({
   setIsExpanded: (v: boolean) => void;
 }) {
   const { t } = useT("modals");
+  const { t: tIssues } = useT("issues");
   const { t: tEditor } = useT("editor");
   const { t: tProjects } = useT("projects");
   const router = useNavigation();
   const p = useWorkspacePaths();
   const workspaceName = useCurrentWorkspace()?.name;
+  const { getActorName } = useActorName();
 
   const draft = useIssueDraftStore((s) => s.draft);
   const setManual = useIssueDraftStore((s) => s.setManual);
@@ -357,6 +270,35 @@ export function ManualCreatePanel({
     handleSkillMentionChange,
     syncSkillMentionsWithDoc,
   } = autoBind;
+
+  // U7 — derive the per-chip designation lines for the run hint. The chip
+  // label is recovered from the description markdown (the user typed it there,
+  // so we never have to round-trip a skills query just to render the line);
+  // the agent name comes from `useActorName`. Backlog suppresses the run —
+  // bind-only path (R8) — so `willRun: false` for that branch. Renders
+  // nothing when the map is empty (R12 silent no-op contract).
+  const designationHints = useMemo<SkillDesignationHint[]>(() => {
+    const entries = Object.entries(skillMentionAgents);
+    if (entries.length === 0) return [];
+    const labelMap = mentionLabelsByTarget(descriptionMirror);
+    const willRun = status !== "backlog";
+    const out: SkillDesignationHint[] = [];
+    for (const [skillId, agentIds] of entries) {
+      // Mirror `useSkillDesignationSubmit`: an explicit empty list is a
+      // silent no-op (R12); skip so the run hint doesn't surface a line
+      // for a chip the user has already cleared.
+      if (!agentIds || agentIds.length === 0) continue;
+      const skillLabel = labelMap.get(`skill:${skillId}`) ?? skillId;
+      for (const agentId of agentIds) {
+        out.push({
+          skillLabel,
+          agentName: getActorName("agent", agentId),
+          willRun,
+        });
+      }
+    }
+    return out;
+  }, [skillMentionAgents, descriptionMirror, status, getActorName]);
 
   // Set the persisted draft's active mode so a later reopen (and any reader of
   // the unified draft) knows which form the user is editing in.
@@ -665,6 +607,20 @@ export function ManualCreatePanel({
           </div>
         ), { duration: 5000 });
       }
+      // U7 — surface the post-create designation outcomes (R13 / R16). The
+      // helper handles both the per-agent bind-only toast (R13) and the
+      // aggregated blocked warning (R16) in one place so the create + edit
+      // paths stay in sync. A missing or malformed outcomes field is a no-op
+      // — the success toast above already covers the happy path.
+      const createOutcomes = parseIssueSkillDesignationOutcomes(
+        issue.skill_designation_outcomes,
+      );
+      surfaceDesignationOutcomes({
+        outcomes: createOutcomes,
+        getActorName,
+        tModals: t,
+        tIssues: tIssues,
+      });
       return true;
     } catch (err) {
       // Duplicate-issue is the only structured 409 the create endpoint
@@ -969,8 +925,14 @@ export function ManualCreatePanel({
 
 
             {/* Pre-trigger preview — a passive caption above the toolbar; reveals
-                when an agent assignee will pick the issue up. */}
-            <CreateRunHint assigneeType={assigneeType} assigneeId={assigneeId} status={status} />
+                when an agent assignee will pick the issue up, and (U7) renders
+                the client-side designation lines for every touched @skill chip. */}
+            <CreateRunHint
+              assigneeType={assigneeType}
+              assigneeId={assigneeId}
+              status={status}
+              designations={designationHints}
+            />
 
             {/* Property toolbar — each field renders per the Settings → Issue
                 selection (see showField above). */}

@@ -12,8 +12,11 @@ import {
 } from "@multica/core/issues/stores/sub-issue-display-store";
 import enCommon from "../../locales/en/common.json";
 import enIssues from "../../locales/en/issues.json";
+import enModals from "../../locales/en/modals.json";
 
-const TEST_RESOURCES = { en: { common: enCommon, issues: enIssues } };
+// `modals` carries the `skill_designation.*` keys used by the U7
+// designation outcome helper (R13 / R16).
+const TEST_RESOURCES = { en: { common: enCommon, issues: enIssues, modals: enModals } };
 
 const mockViewport = vi.hoisted(() => ({ isMobile: false }));
 
@@ -575,9 +578,19 @@ vi.mock("@multica/core/realtime", () => ({
   useRealtimeSync: () => {},
 }));
 
-// Mock sonner
+// Mock sonner — capture the toast spies via vi.hoisted so the test bodies
+// can reach into the mock module without re-importing (re-importing a
+// vi.mock'd module via require returns the cached spy instance, but
+// hoisting the refs up front keeps the test reading order: top of file
+// declares the spies, the bodies read them, no `require` in test code).
+const mockSonner = vi.hoisted(() => ({
+  error: vi.fn(),
+  success: vi.fn(),
+  warning: vi.fn(),
+}));
+
 vi.mock("sonner", () => ({
-  toast: { error: vi.fn(), success: vi.fn() },
+  toast: mockSonner,
 }));
 
 // Mock react-resizable-panels (used by @multica/ui/components/ui/resizable)
@@ -2068,6 +2081,145 @@ describe("IssueDetail (shared)", () => {
         const body = call[1] as Record<string, unknown> | undefined;
         expect(JSON.stringify(body)).not.toContain("skill_mention_agents");
       }
+    });
+  });
+
+  // U7 — post-edit designation outcome feedback (R13 / R16). The edit
+  // path surfaces bind-only + blocked toasts from the parsed
+  // `skill_designation_outcomes` carried on the response body — both on
+  // the autosave (description change) and the touch-only / AE8 path.
+  describe("post-edit designation outcome feedback (U7)", () => {
+    const u7AgentId = "agent-1";
+
+    beforeEach(() => {
+      mockAgentsData.value = [
+        { id: u7AgentId, name: "Agent One", archived_at: null, runtime_id: "runtime-1", runtime_bound: true },
+      ];
+      mockApiObj.getIssue.mockResolvedValue({
+        ...mockIssue,
+        assignee_type: "agent",
+        assignee_id: u7AgentId,
+      });
+      mockApiObj.updateIssue.mockReset();
+      mockSonner.success.mockClear();
+      mockSonner.warning.mockClear();
+    });
+
+    async function triggerAutosave() {
+      renderIssueDetail();
+      await screen.findByText("Implement authentication");
+      await screen.findByTestId("desc-skill-panel");
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      // Insert via the @-menu (typed insertion) and set a designation so
+      // the map has a row to send.
+      fireEvent.click(screen.getByTestId("desc-menu-insert-skill"));
+      fireEvent.click(screen.getByTestId("desc-designate-agent"));
+      await waitFor(() => {
+        expect(screen.getByTestId("desc-skill-designations")).toHaveTextContent(
+          `{"skill-1":["${u7AgentId}"]}`,
+        );
+      });
+      // Edit the description so the autosave fires (and clears the
+      // composer-held map on success — KTD1).
+      fireEvent.change(screen.getByTestId("rich-text-editor"), {
+        target: { value: "Use the reviewer." },
+      });
+    }
+
+    it("fires NO outcome toast on a successful all-triggered response", async () => {
+      mockApiObj.updateIssue.mockResolvedValue({
+        ...mockIssue,
+        skill_designation_outcomes: [
+          { target_type: "agent", target_id: u7AgentId, status: "queued", reason_code: "queued" },
+        ],
+      });
+
+      await triggerAutosave();
+      await waitFor(() => {
+        expect(mockApiObj.updateIssue).toHaveBeenCalled();
+      });
+      // All-triggered outcomes ride the run channel — no extra toast.
+      expect(mockSonner.success).not.toHaveBeenCalled();
+      expect(mockSonner.warning).not.toHaveBeenCalled();
+    });
+
+    it("surfaces one bind-only toast per agent on a `bound` outcome", async () => {
+      mockApiObj.updateIssue.mockResolvedValue({
+        ...mockIssue,
+        skill_designation_outcomes: [
+          { target_type: "agent", target_id: u7AgentId, status: "bound", reason_code: "backlog" },
+          { target_type: "agent", target_id: u7AgentId, status: "merged", reason_code: "merged" },
+        ],
+      });
+
+      await triggerAutosave();
+      await waitFor(() => {
+        expect(mockSonner.success).toHaveBeenCalled();
+      });
+      const message = mockSonner.success.mock.calls[0]?.[0];
+      expect(typeof message).toBe("string");
+      expect(message).toContain("Agent");
+      expect(message).toContain("2");
+      expect(mockSonner.warning).not.toHaveBeenCalled();
+    });
+
+    it("aggregates blocked outcomes into one warning toast listing reasons", async () => {
+      mockApiObj.updateIssue.mockResolvedValue({
+        ...mockIssue,
+        skill_designation_outcomes: [
+          { target_type: "agent", target_id: u7AgentId, status: "blocked", reason_code: "invocation_not_allowed" },
+          { target_type: "agent", target_id: u7AgentId, status: "blocked", reason_code: "runtime_offline" },
+        ],
+      });
+
+      await triggerAutosave();
+      await waitFor(() => {
+        expect(mockSonner.warning).toHaveBeenCalledTimes(1);
+      });
+      const message = mockSonner.warning.mock.calls[0]?.[0];
+      expect(typeof message).toBe("string");
+      expect(message).toContain("2");
+      // Both reasons appear in the joined summary.
+      expect(message.toLowerCase()).toContain("permission");
+      expect(message.toLowerCase()).toMatch(/runtime/);
+      expect(mockSonner.success).not.toHaveBeenCalled();
+    });
+
+    it("fires the same toast surface from the touch-only submit path (AE8)", async () => {
+      mockApiObj.updateIssue.mockReset();
+      mockApiObj.updateIssue.mockResolvedValue({
+        ...mockIssue,
+        skill_designation_outcomes: [
+          { target_type: "agent", target_id: u7AgentId, status: "bound", reason_code: "backlog" },
+        ],
+      });
+
+      renderIssueDetail();
+      await screen.findByText("Implement authentication");
+      await screen.findByTestId("desc-skill-panel");
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      // Insert + designate WITHOUT typing in the editor → only the AE8
+      // popover-close path can fire.
+      fireEvent.click(screen.getByTestId("desc-menu-insert-skill"));
+      fireEvent.click(screen.getByTestId("desc-designate-agent"));
+      await waitFor(() => {
+        expect(screen.getByTestId("desc-skill-designations")).toHaveTextContent(
+          `{"skill-1":["${u7AgentId}"]}`,
+        );
+      });
+      // Close the popover — the AE8 effect in issue-detail fires
+      // `designationSubmit.submit({ source: "user-typing" })`.
+      fireEvent.click(screen.getByTestId("desc-close-popover"));
+
+      await waitFor(() => {
+        expect(mockSonner.success).toHaveBeenCalled();
+      });
     });
   });
 

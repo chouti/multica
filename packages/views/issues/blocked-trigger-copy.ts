@@ -25,6 +25,8 @@ import type { useT } from "../i18n";
 // issue carries the exact command.
 type IssuesT = ReturnType<typeof useT<"issues">>["t"];
 
+export type { IssuesT };
+
 // Full sentence — for tooltips and other surfaces with room to explain.
 export function blockedReasonLabel(reasonCode: string, t: IssuesT): string {
   switch (reasonCode) {

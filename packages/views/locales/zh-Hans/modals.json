@@ -64,6 +64,15 @@
     "create_will_start_squad": "创建后 {{name}} 的队长会评估并开始安排任务。",
     "create_parked": "已指派——在 backlog 中不会开始工作。"
   },
+  "skill_designation": {
+    "run_hint_will_run": "已将 @{{skillName}} 指定给 @{{agentName}}。",
+    "run_hint_bind_only": "已将 @{{skillName}} 指定给 @{{agentName}}——稍后会运行。",
+    "unresolved_hint_other": "待处理的指定暂未发送（下次保存时会重试）。",
+    "outcome_bound_other": "已为 {{agent}} 绑定 {{count}} 个 skill。",
+    "outcome_bind_only_other": "已绑定 {{count}} 个 skill；待 assignee 就绪后运行。",
+    "outcome_blocked_other": "{{count}} 个指定被跳过：{{reasons}}。",
+    "outcome_retry_other": "未能发送 {{count}} 个指定，将重试。"
+  },
   "create_squad": {
     "title": "创建 Squad",
     "description": "创建一个由 Leader Agent 协调团队的协作 Squad，可选添加成员。",

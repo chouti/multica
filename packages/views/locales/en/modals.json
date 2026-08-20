@@ -64,6 +64,20 @@
     "create_will_start_squad": "{{name}}'s leader will review it and start assigning work right after creation.",
     "create_parked": "Assigned — won't start working in Backlog."
   },
+  "skill_designation": {
+    "run_hint_will_run": "Designated @{{skillName}} for @{{agentName}}.",
+    "run_hint_bind_only": "Designated @{{skillName}} for @{{agentName}} — will run later.",
+    "unresolved_hint_one": "Pending: @{{skillName}} not sent yet (will retry on next save).",
+    "unresolved_hint_other": "Pending designations not sent yet (will retry on next save).",
+    "outcome_bound_one": "Bound {{count}} skill to {{agent}}.",
+    "outcome_bound_other": "Bound {{count}} skills to {{agent}}.",
+    "outcome_bind_only_one": "Bound {{count}} skill; will run when the assignee is ready.",
+    "outcome_bind_only_other": "Bound {{count}} skills; will run when the assignee is ready.",
+    "outcome_blocked_one": "{{count}} designation skipped: {{reasons}}.",
+    "outcome_blocked_other": "{{count}} designations skipped: {{reasons}}.",
+    "outcome_retry_one": "Couldn't send {{count}} designation. Will retry.",
+    "outcome_retry_other": "Couldn't send {{count}} designations. Will retry."
+  },
   "create_squad": {
     "title": "Create Squad",
     "description": "Create a collaborative squad with a leader agent and optional additional members.",

@@ -3,12 +3,13 @@
 import { useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
-import type { Issue, UpdateIssueRequest } from "@multica/core/types";
+import type { Issue, IssueSkillDesignationOutcome, UpdateIssueRequest } from "@multica/core/types";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useModalStore } from "@multica/core/modals";
 import { useUpdateIssue } from "@multica/core/issues/mutations";
+import { parseIssueSkillDesignationOutcomes } from "@multica/core/issues/comment-trigger-outcomes";
 import { pinListOptions, useCreatePin, useDeletePin } from "@multica/core/pins";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { useNavigation } from "../../navigation";
@@ -20,7 +21,14 @@ export interface UseIssueActionsResult {
   isPinned: boolean;
   updateField: (
     updates: Partial<UpdateIssueRequest>,
-    options?: { onSuccess?: () => void },
+    options?: {
+      onSuccess?: () => void;
+      /** U7 — fires after the mutation succeeds with the parsed
+       *  `skill_designation_outcomes` from the response body. Allows the
+       *  description autosave to surface bind-only / blocked toasts
+       *  the same way the touch-only submit path does (R13 / R16). */
+      onOutcomes?: (outcomes: IssueSkillDesignationOutcome[]) => void;
+    },
   ) => void;
   openInNewTab: () => void;
   togglePin: () => void;
@@ -74,7 +82,7 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
   const updateField = useCallback(
     (
       updates: Partial<UpdateIssueRequest>,
-      options?: { onSuccess?: () => void },
+      options?: { onSuccess?: () => void; onOutcomes?: (outcomes: IssueSkillDesignationOutcome[]) => void },
     ) => {
       if (!issueId) return;
       if (updates.status === "archived" && issueStatus === "archived") {
@@ -119,12 +127,23 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
         surfaceActions.updateIssue(issueId, updates, {
           errorMessage: t(($) => $.detail.update_failed),
           onSuccess,
+          onOutcomes: options?.onOutcomes,
         });
       } else {
         updateIssue.mutate(
           { id: issueId, ...updates },
           {
-            onSuccess,
+            onSuccess: (data) => {
+              onSuccess();
+              // U7 — surface outcomes from the autosave path the same way
+              // the touch-only submit hook does (R13 / R16).
+              const raw =
+                data && typeof data === "object"
+                  ? (data as { skill_designation_outcomes?: unknown })
+                      .skill_designation_outcomes
+                  : undefined;
+              options?.onOutcomes?.(parseIssueSkillDesignationOutcomes(raw));
+            },
             onError: (err) =>
               toast.error(
                 err instanceof Error && err.message

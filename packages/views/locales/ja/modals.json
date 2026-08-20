@@ -64,6 +64,15 @@
     "create_will_start_squad": "作成後、{{name}} のリーダーが内容を評価し、タスクの割り振りを開始します。",
     "create_parked": "割り当て済み — バックログでは作業を開始しません。"
   },
+  "skill_designation": {
+    "run_hint_will_run": "@{{skillName}} を @{{agentName}} に指定しました。",
+    "run_hint_bind_only": "@{{skillName}} を @{{agentName}} に指定しました — 後で実行されます。",
+    "unresolved_hint_other": "保留中の指定はまだ送信されていません (次の保存時に再試行します)。",
+    "outcome_bound_other": "{{agent}} に {{count}} 件の skill をバインドしました。",
+    "outcome_bind_only_other": "{{count}} 件の skill をバインドしました。assignee の準備が整い次第実行されます。",
+    "outcome_blocked_other": "{{count}} 件の指定をスキップしました：{{reasons}}",
+    "outcome_retry_other": "{{count}} 件の指定を送信できませんでした。再試行します。"
+  },
   "create_squad": {
     "title": "スクワッドを作成",
     "description": "リーダーエージェントと任意の追加メンバーで協働スクワッドを作成します。",

@@ -3,6 +3,7 @@
 import { useCallback, useMemo } from "react";
 import { toast } from "sonner";
 import type { UpdateIssueRequest } from "@multica/core/types";
+import { parseIssueSkillDesignationOutcomes } from "@multica/core/issues/comment-trigger-outcomes";
 import {
   useBatchDeleteIssues,
   useBatchUpdateIssues,
@@ -58,7 +59,21 @@ export function useIssueSurfaceActions({
       updateIssueMutation.mutate(
         { id: issueId, ...updates },
         {
-          onSuccess: () => options?.onSuccess?.(),
+          onSuccess: (data) => {
+            options?.onSuccess?.();
+            // U7 — parse the outcomes field off the response and hand it
+            // back to the caller so they can surface bind-only / blocked
+            // toasts (R13 / R16). `parseIssueSkillDesignationOutcomes` is
+            // defensive on missing or malformed field (returns []), so a
+            // request that didn't carry designations simply produces an
+            // empty array — no fake "no outcomes" toast.
+            const raw =
+              data && typeof data === "object"
+                ? (data as { skill_designation_outcomes?: unknown })
+                    .skill_designation_outcomes
+                : undefined;
+            options?.onOutcomes?.(parseIssueSkillDesignationOutcomes(raw));
+          },
           onError: (err) => {
             toast.error(
               err instanceof Error && err.message

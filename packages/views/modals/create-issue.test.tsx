@@ -15,10 +15,14 @@ import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "../locales/en/common.json";
 import enModals from "../locales/en/modals.json";
 import enEditor from "../locales/en/editor.json";
+import enIssues from "../locales/en/issues.json";
 
 const TEST_RESOURCES = {
-  // `editor` carries the shared upload-gate copy ("Uploading…").
-  en: { common: enCommon, modals: enModals, editor: enEditor },
+  // `editor` carries the shared upload-gate copy ("Uploading…"); `issues`
+  // carries the `comment.trigger_blocked_short_*` keys used by
+  // `blockedShortReasonLabel` (consumed by the U7 designation outcome
+  // helper for the "skipped" reason summary).
+  en: { common: enCommon, modals: enModals, editor: enEditor, issues: enIssues },
 };
 
 function I18nWrapper({ children }: { children: ReactNode }) {
@@ -44,6 +48,8 @@ const mockSetKeepOpen = vi.hoisted(() => vi.fn());
 const mockToastCustom = vi.hoisted(() => vi.fn());
 const mockToastDismiss = vi.hoisted(() => vi.fn());
 const mockToastError = vi.hoisted(() => vi.fn());
+const mockToastSuccess = vi.hoisted(() => vi.fn());
+const mockToastWarning = vi.hoisted(() => vi.fn());
 // Bindable-agent fixture for useSkillMentionAutoOpen (U4): the auto-open gate
 // reads the agent list query; one unarchived agent makes it settle non-empty.
 const mockAgentList = vi.hoisted(() => ({
@@ -633,6 +639,8 @@ vi.mock("sonner", () => ({
     custom: mockToastCustom,
     dismiss: mockToastDismiss,
     error: mockToastError,
+    success: mockToastSuccess,
+    warning: mockToastWarning,
   },
 }));
 
@@ -1417,6 +1425,223 @@ describe("CreateIssueModal", () => {
       // payload, not the in-memory object — a property explicitly set to
       // `undefined` does NOT exist on the wire.
       expect(JSON.stringify(call)).not.toContain("skill_mention_agents");
+    });
+  });
+
+  // U7 — post-create designation outcome toasts (R13 / R16). The create
+  // path parses `skill_designation_outcomes` off the response and surfaces
+  // bind-only (per-agent) + blocked (aggregated) feedback in addition to
+  // the existing "created" toast. The helper is in
+  // `packages/views/issues/utils/skill-designation-toasts.ts`.
+  describe("post-create designation outcome feedback (U7)", () => {
+    beforeEach(() => {
+      mockAgentList.agents = [
+        { id: "agent-1", name: "Agent One", archived_at: null, runtime_id: "runtime-1", runtime_bound: true },
+        { id: "agent-2", name: "Agent Two", archived_at: null, runtime_id: "runtime-1", runtime_bound: true },
+      ];
+    });
+
+    async function submitWithDesignation(agentId: string) {
+      const user = userEvent.setup();
+      renderModal(<CreateIssueModal onClose={vi.fn()} />);
+      fireEvent.change(screen.getByPlaceholderText("Issue title"), {
+        target: { value: "Designated" },
+      });
+      // Insert a chip via the @-menu (typed insertion, KTD3) and pick an
+      // agent so the map has a row to send.
+      const editor = await screen.findByPlaceholderText("Add description...");
+      fireEvent.click(screen.getByTestId("desc-menu-insert-skill"));
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      // Hard-set the designation so we don't depend on the recommendation
+      // engine's resolution.
+      fireEvent.click(screen.getByTestId("desc-designate-agent"));
+      await waitFor(() => {
+        expect(screen.getByTestId("desc-skill-designations")).toHaveTextContent(
+          `{"skill-1":["${agentId}"]}`,
+        );
+      });
+      fireEvent.change(editor, { target: { value: "Use the reviewer" } });
+      await user.click(screen.getByRole("button", { name: "Create Issue" }));
+    }
+
+    it("surfaces one bind-only toast per agent when the response carries bound outcomes", async () => {
+      mockCreateIssue.mockResolvedValue({
+        id: "issue-1",
+        identifier: "TES-1",
+        number: 1,
+        workspace_id: "ws-test",
+        title: "Created",
+        description: null,
+        status: "todo",
+        status_category: "todo",
+        priority: "none",
+        assignee_type: "agent",
+        assignee_id: "agent-1",
+        creator_type: "member",
+        creator_id: "user-1",
+        parent_issue_id: null,
+        project_id: null,
+        position: 0,
+        stage: null,
+        start_date: null,
+        due_date: null,
+        metadata: {},
+        properties: {},
+        reactions: [],
+        labels: [],
+        created_at: "2026-08-19T00:00:00Z",
+        updated_at: "2026-08-19T00:00:00Z",
+        skill_designation_outcomes: [
+          // Two bound outcomes against agent-1 — collapses to one toast
+          // per agent with count=2.
+          { target_type: "agent", target_id: "agent-1", status: "bound", reason_code: "backlog" },
+          { target_type: "agent", target_id: "agent-1", status: "merged", reason_code: "merged" },
+        ],
+      });
+
+      await submitWithDesignation("agent-1");
+
+      await waitFor(() => {
+        expect(mockToastSuccess).toHaveBeenCalledTimes(1);
+      });
+      const message = mockToastSuccess.mock.calls[0]?.[0];
+      expect(typeof message).toBe("string");
+      // `useActorName` is mocked to return "Agent" regardless of the id,
+      // so the bound-agent label is always "Agent" in this suite — the
+      // count and template are the load-bearing assertions here.
+      expect(message).toContain("Agent");
+      expect(message).toContain("2");
+      expect(mockToastWarning).not.toHaveBeenCalled();
+    });
+
+    it("aggregates blocked outcomes into a single warning toast listing reasons", async () => {
+      mockCreateIssue.mockResolvedValue({
+        id: "issue-1",
+        identifier: "TES-1",
+        number: 1,
+        workspace_id: "ws-test",
+        title: "Created",
+        description: null,
+        status: "todo",
+        status_category: "todo",
+        priority: "none",
+        assignee_type: null,
+        assignee_id: null,
+        creator_type: "member",
+        creator_id: "user-1",
+        parent_issue_id: null,
+        project_id: null,
+        position: 0,
+        stage: null,
+        start_date: null,
+        due_date: null,
+        metadata: {},
+        properties: {},
+        reactions: [],
+        labels: [],
+        created_at: "2026-08-19T00:00:00Z",
+        updated_at: "2026-08-19T00:00:00Z",
+        skill_designation_outcomes: [
+          { target_type: "agent", target_id: "agent-1", status: "blocked", reason_code: "invocation_not_allowed" },
+          { target_type: "agent", target_id: "agent-2", status: "blocked", reason_code: "runtime_offline" },
+          // Same reason on a different agent → single reason in the joined
+          // list. Dedup is per `blockedShortReasonLabel`.
+          { target_type: "agent", target_id: "agent-1", status: "blocked", reason_code: "invocation_not_allowed" },
+        ],
+      });
+
+      await submitWithDesignation("agent-1");
+
+      await waitFor(() => {
+        expect(mockToastWarning).toHaveBeenCalledTimes(1);
+      });
+      const message = mockToastWarning.mock.calls[0]?.[0];
+      expect(typeof message).toBe("string");
+      // 3 blocked entries (count) — message should reflect that.
+      expect(message).toContain("3");
+      // Both reasons appear in the joined summary.
+      expect(message.toLowerCase()).toContain("permission");
+      expect(message.toLowerCase()).toMatch(/runtime/);
+      expect(mockToastSuccess).not.toHaveBeenCalled();
+    });
+
+    it("stays silent on a successful all-triggered outcome set (no extra toast)", async () => {
+      mockCreateIssue.mockResolvedValue({
+        id: "issue-1",
+        identifier: "TES-1",
+        number: 1,
+        workspace_id: "ws-test",
+        title: "Created",
+        description: null,
+        status: "todo",
+        status_category: "todo",
+        priority: "none",
+        assignee_type: "agent",
+        assignee_id: "agent-1",
+        creator_type: "member",
+        creator_id: "user-1",
+        parent_issue_id: null,
+        project_id: null,
+        position: 0,
+        stage: null,
+        start_date: null,
+        due_date: null,
+        metadata: {},
+        properties: {},
+        reactions: [],
+        labels: [],
+        created_at: "2026-08-19T00:00:00Z",
+        updated_at: "2026-08-19T00:00:00Z",
+        skill_designation_outcomes: [
+          // Triggered outcomes ride the normal run channel — no toast.
+          { target_type: "agent", target_id: "agent-1", status: "queued", reason_code: "queued" },
+        ],
+      });
+
+      await submitWithDesignation("agent-1");
+
+      // The "created" toast still fires once.
+      await waitFor(() => expect(mockToastCustom).toHaveBeenCalled());
+      expect(mockToastSuccess).not.toHaveBeenCalled();
+      expect(mockToastWarning).not.toHaveBeenCalled();
+    });
+
+    it("renders no designation line on CreateRunHint when the composer map is empty", () => {
+      // No chip insertion, no designation → no line.
+      renderModal(<CreateIssueModal onClose={vi.fn()} />);
+      // The create-run-hint is hidden by default (no agent assignee), so
+      // we check by querying the testid and asserting its absence.
+      expect(screen.queryByTestId("create-run-hint-designation")).toBeNull();
+    });
+
+    it("renders a designation line on CreateRunHint when the composer map has entries", async () => {
+      renderModal(<CreateIssueModal onClose={vi.fn()} />);
+      await screen.findByPlaceholderText("Add description...");
+      // Insert via the @-menu (typed insertion) and set a designation so
+      // the run-hint has a row to render.
+      fireEvent.click(screen.getByTestId("desc-menu-insert-skill"));
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      fireEvent.click(screen.getByTestId("desc-designate-agent"));
+      // The chip markup the editor mock emits uses `@code-review` as the
+      // label (see the menu-insert-skill handler), so we can match that.
+      await waitFor(() => {
+        expect(screen.getAllByTestId("create-run-hint-designation").length).toBeGreaterThan(0);
+      });
+      // The line carries the localized "Designated @<skill> for @<agent>"
+      // template. The mock agent lookup returns "Agent" hardcoded, so we
+      // match that; the chip label falls back to the skill id ("skill-1")
+      // because the editor mock never inserts a chip with the label into
+      // the doc.
+      const lines = screen.getAllByTestId("create-run-hint-designation");
+      const allText = lines.map((el) => el.textContent ?? "").join(" ");
+      expect(allText).toContain("@skill-1");
+      expect(allText).toContain("Agent");
     });
   });
 

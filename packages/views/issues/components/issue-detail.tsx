@@ -74,6 +74,7 @@ import { formatProgressText } from "./child-progress";
 import { CurrentIssueRenderContextProvider } from "../current-issue-render-context";
 import { useSkillAutoBind } from "../hooks/use-skill-auto-bind";
 import { useSkillDesignationSubmit } from "../hooks/use-skill-designation-submit";
+import { surfaceDesignationOutcomes } from "../utils/skill-designation-toasts";
 import { ResolvedThreadBar } from "./resolved-thread-bar";
 import { getShortcut, shortcutMatchesEvent } from "@multica/core/shortcuts";
 import { isImeComposing } from "@multica/core/utils";
@@ -1083,6 +1084,7 @@ export function IssueDetailSkeleton({ leading }: { leading?: ReactNode } = {}) {
 
 export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = true, layoutId = "multica_issue_detail_layout", highlightCommentId, highlightRequestToken, leadingAction }: IssueDetailProps) {
   const { t } = useT("issues");
+  const { t: tModals } = useT("modals");
   const timeAgo = useTimeAgo();
   const id = issueId;
   const user = useAuthStore((s) => s.user);
@@ -1907,11 +1909,20 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const designationSubmit = useSkillDesignationSubmit({
     issueId: id,
     skillMentionAgents,
-    onSuccess: () => {
+    onSuccess: (outcomes) => {
       // Consume (KTD1): the in-flight submission landed, so a subsequent
       // autosave should not re-send the same payload. Keep the map empty
       // until the user touches another chip.
       setSkillMentionAgents({});
+      // U7 — surface bind-only + blocked toasts on the touch-only / AE8
+      // submit path (R13 / R16). Triggered outcomes (queued / coalesced)
+      // are already visible through the run channel; no extra toast.
+      surfaceDesignationOutcomes({
+        outcomes,
+        getActorName,
+        tModals,
+        tIssues: t,
+      });
     },
   });
   // AE8 trigger (R10): when the popover closes (open → close transition)
@@ -2874,6 +2885,18 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                       setSkillMentionAgents({});
                     }
                   },
+                  // U7 — surface bind-only + blocked outcomes on the
+                  // autosave path (R13 / R16). Touch-only / AE8 path goes
+                  // through `designationSubmit.onSuccess` above; this
+                  // covers the description-change case where the
+                  // designation rides the same autosave body.
+                  onOutcomes: (outcomes) =>
+                    surfaceDesignationOutcomes({
+                      outcomes,
+                      getActorName,
+                      tModals,
+                      tIssues: t,
+                    }),
                 });
               }}
               onUploadFile={handleDescriptionUpload}
