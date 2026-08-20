@@ -99,6 +99,18 @@ type IssueSkillDesignationOutcome struct {
 	ReasonCode DispatchReasonCode `json:"reason_code"`
 }
 
+// issueSkillDesignationOutcomeFor constructs an IssueSkillDesignationOutcome
+// for an agent-designated target. The issue path always designates agents (the
+// comment path uses a different struct), so TargetType is invariant.
+func issueSkillDesignationOutcomeFor(agentID pgtype.UUID, status DispatchStatus, reason DispatchReasonCode) IssueSkillDesignationOutcome {
+	return IssueSkillDesignationOutcome{
+		TargetType: "agent",
+		TargetID:   uuidToString(agentID),
+		Status:     status,
+		ReasonCode: reason,
+	}
+}
+
 // validIssuePriorities mirrors the CHECK constraint on the issue table. Write
 // handlers pre-validate it so callers get a clean 400 with the allowed values
 // instead of a database CHECK violation bubbling up as a 500.
@@ -3098,8 +3110,16 @@ func (h *Handler) gateIssueSkillDesignations(ctx context.Context, wsUUID pgtype.
 			return
 		}
 		blockedSeen[key] = struct{}{}
-		blocked = append(blocked, IssueSkillDesignationOutcome{TargetType: "agent", TargetID: key, Status: DispatchBlocked, ReasonCode: reason})
+		blocked = append(blocked, issueSkillDesignationOutcomeFor(agentID, DispatchBlocked, reason))
 	}
+
+	// Single-flight caches survive across loop iterations: a max-sized request
+	// (16 skills × 8 agents) routinely re-encounters the same skill id (the
+	// mention regex picks up each chip independently) or the same agent id
+	// (designated for several chips). The verdict is workspace-scoped and never
+	// changes inside this gate, so the second hit is wasted DB work.
+	var skillCache map[pgtype.UUID]bool     // true = skill exists in workspace
+	var agentCache map[pgtype.UUID]db.Agent // cached Agent struct on hit
 
 	for _, m := range util.ParseMentions(description) {
 		if m.Type != "skill" || m.ID == "all" {
@@ -3117,10 +3137,19 @@ func (h *Handler) gateIssueSkillDesignations(ctx context.Context, wsUUID pgtype.
 		if err != nil {
 			continue
 		}
-		if _, err := h.Queries.GetSkillInWorkspace(ctx, db.GetSkillInWorkspaceParams{
-			ID:          skillUUID,
-			WorkspaceID: wsUUID,
-		}); err != nil {
+		skillValid, skillChecked := skillCache[skillUUID]
+		if !skillChecked {
+			_, queryErr := h.Queries.GetSkillInWorkspace(ctx, db.GetSkillInWorkspaceParams{
+				ID:          skillUUID,
+				WorkspaceID: wsUUID,
+			})
+			skillValid = queryErr == nil
+			if skillCache == nil {
+				skillCache = make(map[pgtype.UUID]bool)
+			}
+			skillCache[skillUUID] = skillValid
+		}
+		if !skillValid {
 			// Unknown / cross-workspace skill: drop every designation silently.
 			continue
 		}
@@ -3128,14 +3157,22 @@ func (h *Handler) gateIssueSkillDesignations(ctx context.Context, wsUUID pgtype.
 			if !agentID.Valid {
 				continue
 			}
-			agent, err := h.Queries.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{
-				ID:          agentID,
-				WorkspaceID: wsUUID,
-			})
-			if err != nil {
-				// Enumeration-safe: not-found and cross-workspace look identical.
-				addBlocked(agentID, ReasonInvocationNotAllowed)
-				continue
+			agent, agentChecked := agentCache[agentID]
+			if !agentChecked {
+				a, queryErr := h.Queries.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{
+					ID:          agentID,
+					WorkspaceID: wsUUID,
+				})
+				if queryErr != nil {
+					// Enumeration-safe: not-found and cross-workspace look identical.
+					addBlocked(agentID, ReasonInvocationNotAllowed)
+					continue
+				}
+				if agentCache == nil {
+					agentCache = make(map[pgtype.UUID]db.Agent)
+				}
+				agentCache[agentID] = a
+				agent = a
 			}
 			// Private-agent gate first, before any archived/runtime state is read.
 			if !h.canInvokeAgent(ctx, agent, actorType, actorID, originatorUserID, wsID) {
@@ -3202,7 +3239,7 @@ func (h *Handler) applyCreateIssueSkillDesignations(ctx context.Context, issue d
 	for _, key := range order {
 		agentID := agentIDs[key]
 		merged := func() {
-			outcomes = append(outcomes, IssueSkillDesignationOutcome{TargetType: "agent", TargetID: key, Status: DispatchMerged, ReasonCode: ReasonCoalesced})
+			outcomes = append(outcomes, issueSkillDesignationOutcomeFor(agentID, DispatchMerged, ReasonCoalesced))
 		}
 
 		// KTD3 merge: the designation targets the assignee agent whose natural
@@ -3214,7 +3251,7 @@ func (h *Handler) applyCreateIssueSkillDesignations(ctx context.Context, issue d
 		}
 		// R8: backlog parks every designation run; the bind stands.
 		if isBacklog {
-			outcomes = append(outcomes, IssueSkillDesignationOutcome{TargetType: "agent", TargetID: key, Status: DispatchBound, ReasonCode: ReasonDeferred})
+			outcomes = append(outcomes, issueSkillDesignationOutcomeFor(agentID, DispatchBound, ReasonDeferred))
 			continue
 		}
 		// Pending guard (review M3): an already-pending (issue, agent) task —
@@ -3222,7 +3259,7 @@ func (h *Handler) applyCreateIssueSkillDesignations(ctx context.Context, issue d
 		// designated agent, or a concurrent duplicate — absorbs this trigger.
 		hasPending, err := h.hasPendingTaskForIssueAndAgent(ctx, issue.ID, agentID, commentTriggerComputeOptions{})
 		if err != nil {
-			outcomes = append(outcomes, IssueSkillDesignationOutcome{TargetType: "agent", TargetID: key, Status: DispatchBlocked, ReasonCode: ReasonInternalError})
+			outcomes = append(outcomes, issueSkillDesignationOutcomeFor(agentID, DispatchBlocked, ReasonInternalError))
 			continue
 		}
 		if hasPending {
@@ -3236,10 +3273,10 @@ func (h *Handler) applyCreateIssueSkillDesignations(ctx context.Context, issue d
 				merged()
 				continue
 			}
-			outcomes = append(outcomes, IssueSkillDesignationOutcome{TargetType: "agent", TargetID: key, Status: DispatchBlocked, ReasonCode: commentEnqueueFailureReason(err)})
+			outcomes = append(outcomes, issueSkillDesignationOutcomeFor(agentID, DispatchBlocked, commentEnqueueFailureReason(err)))
 			continue
 		}
-		outcomes = append(outcomes, IssueSkillDesignationOutcome{TargetType: "agent", TargetID: key, Status: DispatchQueued, ReasonCode: ReasonQueued})
+		outcomes = append(outcomes, issueSkillDesignationOutcomeFor(agentID, DispatchQueued, ReasonQueued))
 	}
 	return outcomes
 }
@@ -3319,6 +3356,33 @@ func (h *Handler) applyUpdateIssueSkillDesignations(ctx context.Context, issue d
 		}
 	}
 
+	// Single-flight skill-name resolution: collect every unique skill id
+	// across all designated agents, then issue GetSkillInWorkspace once per
+	// skill. The handoff note helper then reads names from this map instead
+	// of re-querying the same skill for every agent that was designated for
+	// it (a max-sized request can fan a single skill out across many agents).
+	uniqueSkillIDs := make([]pgtype.UUID, 0, len(designations))
+	seenSkills := make(map[pgtype.UUID]struct{}, len(designations))
+	for skillID := range designations {
+		if _, ok := seenSkills[skillID]; ok {
+			continue
+		}
+		seenSkills[skillID] = struct{}{}
+		uniqueSkillIDs = append(uniqueSkillIDs, skillID)
+	}
+	skillNameByID := make(map[pgtype.UUID]string, len(uniqueSkillIDs))
+	for _, id := range uniqueSkillIDs {
+		if !id.Valid {
+			continue
+		}
+		if s, err := h.Queries.GetSkillInWorkspace(ctx, db.GetSkillInWorkspaceParams{
+			ID:          id,
+			WorkspaceID: issue.WorkspaceID,
+		}); err == nil {
+			skillNameByID[id] = s.Name
+		}
+	}
+
 	isBacklog := issuestatus.Effective(ctx, h.Queries, issue.WorkspaceID, issue.Status) == "backlog"
 
 	// Squad equivalence (review M3): when the final assignee is a squad, its
@@ -3336,10 +3400,10 @@ func (h *Handler) applyUpdateIssueSkillDesignations(ctx context.Context, issue d
 	for _, key := range order {
 		d := agents[key]
 		bound := func() {
-			outcomes = append(outcomes, IssueSkillDesignationOutcome{TargetType: "agent", TargetID: key, Status: DispatchBound, ReasonCode: ReasonDeferred})
+			outcomes = append(outcomes, issueSkillDesignationOutcomeFor(d.agentID, DispatchBound, ReasonDeferred))
 		}
 		merged := func() {
-			outcomes = append(outcomes, IssueSkillDesignationOutcome{TargetType: "agent", TargetID: key, Status: DispatchMerged, ReasonCode: ReasonCoalesced})
+			outcomes = append(outcomes, issueSkillDesignationOutcomeFor(d.agentID, DispatchMerged, ReasonCoalesced))
 		}
 
 		// Pending guard first (M3): a run that already covers this agent — the
@@ -3347,7 +3411,7 @@ func (h *Handler) applyUpdateIssueSkillDesignations(ctx context.Context, issue d
 		// pending task — absorbs the designation trigger.
 		hasPending, err := h.hasPendingTaskForIssueAndAgent(ctx, issue.ID, d.agentID, commentTriggerComputeOptions{})
 		if err != nil {
-			outcomes = append(outcomes, IssueSkillDesignationOutcome{TargetType: "agent", TargetID: key, Status: DispatchBlocked, ReasonCode: ReasonInternalError})
+			outcomes = append(outcomes, issueSkillDesignationOutcomeFor(d.agentID, DispatchBlocked, ReasonInternalError))
 			continue
 		}
 		if hasPending {
@@ -3369,7 +3433,7 @@ func (h *Handler) applyUpdateIssueSkillDesignations(ctx context.Context, issue d
 			bound()
 			continue
 		}
-		note := h.issueSkillDesignationHandoffNote(ctx, issue, actorType, actorID, d.skillIDs)
+		note := h.issueSkillDesignationHandoffNote(ctx, issue, actorType, actorID, d.skillIDs, skillNameByID)
 		if _, err := h.TaskService.EnqueueTaskForMentionWithActor(ctx, issue, d.agentID, note, memberActorUserID(actorType, actorID)); err != nil {
 			// A sibling task won the insert race between the pending check and
 			// the enqueue: the agent is covered — merged, never an error.
@@ -3377,10 +3441,10 @@ func (h *Handler) applyUpdateIssueSkillDesignations(ctx context.Context, issue d
 				merged()
 				continue
 			}
-			outcomes = append(outcomes, IssueSkillDesignationOutcome{TargetType: "agent", TargetID: key, Status: DispatchBlocked, ReasonCode: commentEnqueueFailureReason(err)})
+			outcomes = append(outcomes, issueSkillDesignationOutcomeFor(d.agentID, DispatchBlocked, commentEnqueueFailureReason(err)))
 			continue
 		}
-		outcomes = append(outcomes, IssueSkillDesignationOutcome{TargetType: "agent", TargetID: key, Status: DispatchQueued, ReasonCode: ReasonQueued})
+		outcomes = append(outcomes, issueSkillDesignationOutcomeFor(d.agentID, DispatchQueued, ReasonQueued))
 	}
 	return outcomes
 }
@@ -3392,7 +3456,13 @@ func (h *Handler) applyUpdateIssueSkillDesignations(ctx context.Context, issue d
 // touches a user-written handoff field. An old daemon that cannot render the
 // note drops it and the run degrades to reading the description itself
 // (runtimeSupportsHandoff already covers the preview soft-signal).
-func (h *Handler) issueSkillDesignationHandoffNote(ctx context.Context, issue db.Issue, actorType, actorID string, skillIDs []pgtype.UUID) string {
+//
+// skillNameByID is pre-populated by the caller with one entry per unique skill
+// across all designated agents; this avoids issuing one GetSkillInWorkspace
+// query per (skill, agent) pair when a skill is designated for several
+// agents (a max-sized request can fan out the same skill id across many
+// agents).
+func (h *Handler) issueSkillDesignationHandoffNote(ctx context.Context, issue db.Issue, actorType, actorID string, skillIDs []pgtype.UUID, skillNameByID map[pgtype.UUID]string) string {
 	actorName := "Someone"
 	if id, err := util.ParseUUID(actorID); err == nil {
 		switch actorType {
@@ -3411,11 +3481,8 @@ func (h *Handler) issueSkillDesignationHandoffNote(ctx context.Context, issue db
 		if !skillID.Valid {
 			continue
 		}
-		if skill, err := h.Queries.GetSkillInWorkspace(ctx, db.GetSkillInWorkspaceParams{
-			ID:          skillID,
-			WorkspaceID: issue.WorkspaceID,
-		}); err == nil {
-			labels = append(labels, "@"+skill.Name)
+		if name, ok := skillNameByID[skillID]; ok {
+			labels = append(labels, "@"+name)
 		}
 	}
 	if len(labels) == 0 {
