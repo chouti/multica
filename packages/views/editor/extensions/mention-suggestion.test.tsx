@@ -1091,6 +1091,61 @@ describe("createMentionSuggestion", () => {
     expect(command.mock.calls[0]?.[0]?.id).toBe("sk1");
     expect(command.mock.calls[0]?.[0]?.label).toBe("code-review");
   });
+
+  // KD5: editors where skill designation has no business meaning (the
+  // agent-mode prompt panel) suppress the @ menu's skill rows at the source —
+  // both suggestion modes funnel through buildSyncItems, so the single guard
+  // covers default and context mode alike.
+  it("suppresses skill rows when disableSkillItems is set (default mode)", () => {
+    const qc = fakeQc({
+      members: [{ user_id: "u1", name: "Alice", role: "member" }],
+      skills: [{ id: "sk1", name: "code-review", description: "Review pull requests" }],
+    });
+    searchIssuesMock.mockReturnValue(new Promise(() => {}));
+
+    const config = createMentionSuggestion(qc, { disableSkillItems: true });
+    const result = config.items!(itemArgs("")) as MentionItem[];
+
+    expect(result.some((i) => i.type === "skill")).toBe(false);
+    // Only the skill rows are suppressed — the rest of the menu is untouched.
+    expect(result.some((i) => i.type === "member" && i.label === "Alice")).toBe(true);
+  });
+
+  it("suppresses skill rows when disableSkillItems is set (context mode)", () => {
+    const qc = fakeQc({
+      skills: [{ id: "sk1", name: "code-review", description: "Review pull requests" }],
+    });
+    searchIssuesMock.mockReturnValue(new Promise(() => {}));
+
+    const config = createMentionSuggestion(qc, {
+      mode: "context",
+      disableSkillItems: true,
+      getContextItems: () => [],
+    });
+    const result = config.items!(itemArgs("code")) as MentionItem[];
+
+    expect(result.some((i) => i.type === "skill")).toBe(false);
+  });
+
+  // New editor mount points (create-issue description, issue-detail
+  // description) build their suggestion through this same factory, so the
+  // four-cache warm-up firing here is what keeps their cold-cache @ dropdown
+  // non-empty (skill-autocomplete-cold-cache).
+  it("warms the mentionable-entity caches on factory construction", () => {
+    const ensured: string[] = [];
+    const qc = fakeQc({});
+    qc.ensureQueryData = ((options: { queryKey: readonly unknown[] }) => {
+      ensured.push(JSON.stringify(options.queryKey));
+      return Promise.resolve();
+    }) as QueryClient["ensureQueryData"];
+
+    createMentionSuggestion(qc);
+
+    expect(ensured).toContain(JSON.stringify(workspaceKeys.skills("ws-1")));
+    expect(ensured).toContain(JSON.stringify(workspaceKeys.agents("ws-1")));
+    expect(ensured).toContain(JSON.stringify(workspaceKeys.squads("ws-1")));
+    expect(ensured).toContain(JSON.stringify(workspaceKeys.members("ws-1")));
+  });
 });
 
 // MUL-5824: the search API already demotes cancelled issues, but the picker

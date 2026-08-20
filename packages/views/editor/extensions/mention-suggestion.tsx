@@ -741,6 +741,16 @@ interface MentionSuggestionOptions {
   mode?: "default" | "context";
   getContextItems?: () => MentionItem[];
   /**
+   * When true, the `@` menu never lists skill items. Skill mention NODES stay
+   * in the schema (pasted or hydrated chips still render); only the picker's
+   * skill rows are suppressed. Both suggestion modes funnel through
+   * buildSyncItems, so conditioning the source covers either mode. Use for
+   * editors where skill designation has no business meaning (KD5: the
+   * agent-mode prompt panel — the prompt is already the instruction to the
+   * chosen actor).
+   */
+  disableSkillItems?: boolean;
+  /**
    * Fired when the user picks a `skill` item from the @ suggestion menu —
    * i.e. only on the typed-selection path where Tiptap's suggestion command
    * inserts the mention node. Pasted skill markup, undo/redo, and quick-action
@@ -854,7 +864,9 @@ export function createMentionSuggestion(
             : undefined,
       }));
 
-    const skills: SkillSummary[] = qc.getQueryData(workspaceKeys.skills(wsId)) ?? [];
+    const skills: SkillSummary[] = options.disableSkillItems
+      ? []
+      : (qc.getQueryData(workspaceKeys.skills(wsId)) ?? []);
     const skillItems: MentionItem[] = skills
       .filter((s) => s.name.toLowerCase().includes(q) || s.description.toLowerCase().includes(q) || matchesPinyin(s.name, q))
       .map((s) => ({ id: s.id, label: s.name, type: "skill" as const, description: s.description }));

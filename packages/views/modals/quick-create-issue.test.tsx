@@ -272,7 +272,7 @@ vi.mock("../editor", async () => {
   const composer = await vi.importActual<typeof import("../editor/use-composer-submit")>(
     "../editor/use-composer-submit",
   );
-  const ContentEditor = forwardRef(({ defaultValue, onUpdate, onSubmit, onUploadFile, onUploadingChange, placeholder }: any, ref: any) => {
+  const ContentEditor = forwardRef(({ defaultValue, onUpdate, onSubmit, onUploadFile, onUploadingChange, placeholder, disableSkillItems }: any, ref: any) => {
     const valueRef = useRef(defaultValue || "");
     const [value, setValue] = useState(defaultValue || "");
     // Mirrors the real editor's `uploading` node attrs: the placeholder sits
@@ -311,6 +311,7 @@ vi.mock("../editor", async () => {
         <textarea
           value={value}
           placeholder={placeholder}
+          data-disable-skill-items={disableSkillItems ? "true" : undefined}
           onChange={(e) => {
             valueRef.current = e.target.value;
             setValue(e.target.value);
@@ -500,6 +501,19 @@ describe("AgentCreatePanel", () => {
         'Tell the agent what to do, e.g. "let Bohan fix the inbox loading slowness in the Web project"',
       ),
     ).toHaveValue("Persisted draft prompt");
+  });
+
+  // KD5: the agent-mode prompt is already the instruction to the chosen
+  // actor, so its @ menu must not offer skill items — the designation
+  // affordance would be dead here.
+  it("suppresses skill items in the agent prompt @ menu", () => {
+    renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
+
+    expect(
+      screen.getByPlaceholderText(
+        'Tell the agent what to do, e.g. "let Bohan fix the inbox loading slowness in the Web project"',
+      ),
+    ).toHaveAttribute("data-disable-skill-items", "true");
   });
 
   it("restores unfinished actor, project, priority, and due-date selections after remount", async () => {

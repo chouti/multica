@@ -633,6 +633,12 @@ export function AgentCreatePanel({
             attachments={pendingAttachments}
             onSubmit={submit}
             debounceMs={150}
+            // KD5: the agent-mode prompt is already the instruction to the
+            // chosen actor — its @ menu must not offer skill rows, since
+            // skill designation has no business meaning here. The
+            // manual→agent mode-switch seed strips skill chips to plain text
+            // in create-issue.tsx so a dead affordance never crosses over.
+            disableSkillItems
           />
           {isDragOver && <FileDropOverlay />}
         </div>

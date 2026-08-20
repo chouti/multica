@@ -44,6 +44,11 @@ const mockSetKeepOpen = vi.hoisted(() => vi.fn());
 const mockToastCustom = vi.hoisted(() => vi.fn());
 const mockToastDismiss = vi.hoisted(() => vi.fn());
 const mockToastError = vi.hoisted(() => vi.fn());
+// Bindable-agent fixture for useSkillMentionAutoOpen (U4): the auto-open gate
+// reads the agent list query; one unarchived agent makes it settle non-empty.
+const mockAgentList = vi.hoisted(() => ({
+  agents: [] as Array<{ id: string; name: string; archived_at: string | null }>,
+}));
 // Uploads flow through the module-level coordinator, which calls
 // `api.uploadFile(file, ctx, signal)` (MUL-5181 L2). Tests drive uploads by
 // mocking that call; it resolves a plain server Attachment row.
@@ -192,6 +197,20 @@ vi.mock("@multica/core/workspace/hooks", () => ({
   useActorName: () => ({ getActorName: () => "Agent" }),
 }));
 
+// Spread the real module so every export the suite does not control flows
+// through untouched (the whole-module-mock lesson); only the agent list is
+// fixtured — useSkillMentionAutoOpen (U4) gates the typed-insert auto-open on
+// it settling non-empty.
+vi.mock("@multica/core/workspace/queries", async () => ({
+  ...(await vi.importActual<typeof import("@multica/core/workspace/queries")>(
+    "@multica/core/workspace/queries",
+  )),
+  agentListOptions: (wsId: string) => ({
+    queryKey: ["workspaces", wsId, "agents"],
+    queryFn: () => Promise.resolve(mockAgentList.agents),
+  }),
+}));
+
 // CreateRunHint now renders an ActorAvatar for agent/squad assignees. This
 // suite is about the create form, not the avatar (whose own workspace/presence/
 // navigation hook tree is exercised elsewhere), so stub it inert.
@@ -295,17 +314,23 @@ vi.mock("../editor", async () => {
   const composer = await vi.importActual<typeof import("../editor/use-composer-submit")>(
     "../editor/use-composer-submit",
   );
-  const ContentEditor = forwardRef(({ defaultValue, onUpdate, onSubmit, onUploadFile, onUploadingChange, placeholder, attachments }: any, ref: any) => {
+  const ContentEditor = forwardRef(({ defaultValue, onUpdate, onSubmit, onUploadFile, onUploadingChange, placeholder, attachments, skillMentionContext, onSkillMentionInserted, disableSkillItems }: any, ref: any) => {
     const valueRef = useRef(defaultValue || "");
     const [value, setValue] = useState(defaultValue || "");
+    // Mirrors the real editor's skill-mention nodes: a menu insert puts the
+    // chip in the document, so getSkillMentionIds answers it (the auto-open
+    // in-flight tail drops held requests for chips that are no longer present).
+    const skillMentionIdsRef = useRef<string[]>([]);
     // Mirrors the real editor's `uploading` node attrs: the placeholder is in
     // the doc from before the await until the upload settles, and the host
     // hears about it through onUploadingChange.
     const inFlightRef = useRef(0);
     useImperativeHandle(ref, () => ({
       getMarkdown: () => valueRef.current,
+      getSkillMentionIds: () => skillMentionIdsRef.current,
       clearContent: () => {
         valueRef.current = "";
+        skillMentionIdsRef.current = [];
         setValue("");
       },
       uploadFile: async (file: File) => {
@@ -331,6 +356,7 @@ vi.mock("../editor", async () => {
           value={value}
           placeholder={placeholder}
           data-attachments-count={attachments?.length ?? 0}
+          data-disable-skill-items={disableSkillItems ? "true" : undefined}
           onChange={(e) => {
             valueRef.current = e.target.value;
             setValue(e.target.value);
@@ -342,6 +368,38 @@ vi.mock("../editor", async () => {
             if ((e.metaKey || e.ctrlKey) && e.key === "Enter") onSubmit?.();
           }}
         />
+        {skillMentionContext && (
+          <div data-testid="desc-skill-panel">
+            <span data-testid="desc-skill-popover-open-for">
+              {skillMentionContext.openPopoverFor ?? ""}
+            </span>
+            {/* The composer-held designation map, so user gestures can be
+                asserted without the popover itself. */}
+            <span data-testid="desc-skill-designations">
+              {JSON.stringify(skillMentionContext.skillMentionAgents)}
+            </span>
+            {/* Typed @-menu selection: the suggestion command inserted the
+                chip and notified the composer. */}
+            <button
+              type="button"
+              data-testid="desc-menu-insert-skill"
+              onClick={() => {
+                skillMentionIdsRef.current = ["skill-1"];
+                onSkillMentionInserted?.("skill-1");
+              }}
+            >
+              Insert skill via menu
+            </button>
+            {/* Manual gesture: an agent picked in the chip's popover. */}
+            <button
+              type="button"
+              data-testid="desc-designate-agent"
+              onClick={() => skillMentionContext.onSkillMentionChange("skill-1", ["agent-1"])}
+            >
+              Designate agent-1
+            </button>
+          </div>
+        )}
       </>
     );
   });
@@ -1025,6 +1083,107 @@ describe("CreateIssueModal", () => {
     });
     // Actor rides the store, not the carry; no parent here → carry is null.
     expect(onSwitchMode.mock.calls[0]?.[0]).toBeNull();
+  });
+
+  // U4: the manual description editor carries the skill-mention designation
+  // context (the comment-composer pattern), and the manual→agent seed
+  // degrades skill chips to plain text (KD5 — the agent panel offers no
+  // skill designation, so the dead affordance must not cross the switch).
+  describe("skill mention designation context (U4)", () => {
+    beforeEach(() => {
+      mockAgentList.agents = [{ id: "agent-1", name: "Agent One", archived_at: null }];
+    });
+
+    it("exposes the designation context on the manual description editor and registers a typed skill chip", async () => {
+      renderModal(<CreateIssueModal onClose={vi.fn()} />);
+
+      // The context probe only renders once the description editor mounted
+      // with skillMentionContext wired.
+      await screen.findByTestId("desc-skill-panel");
+
+      fireEvent.click(screen.getByTestId("desc-menu-insert-skill"));
+
+      // The typed-insert signal registers the chip in the composer's single
+      // popover slot (gated on the bindable-agent list settling non-empty).
+      await waitFor(() => {
+        expect(screen.getByTestId("desc-skill-popover-open-for")).toHaveTextContent("skill-1");
+      });
+    });
+
+    it("writes the composer-held designation map on the manual chip gesture", async () => {
+      renderModal(<CreateIssueModal onClose={vi.fn()} />);
+      await screen.findByTestId("desc-skill-panel");
+
+      fireEvent.click(screen.getByTestId("desc-designate-agent"));
+
+      await waitFor(() => {
+        expect(screen.getByTestId("desc-skill-designations")).toHaveTextContent(
+          '{"skill-1":["agent-1"]}',
+        );
+      });
+    });
+
+    it("does not suppress skill items in the manual description editor", async () => {
+      renderModal(<CreateIssueModal onClose={vi.fn()} />);
+
+      const editor = await screen.findByPlaceholderText("Add description...");
+      expect(editor).not.toHaveAttribute("data-disable-skill-items", "true");
+    });
+
+    it("strips skill chips to plain text when seeding the agent prompt on mode switch", async () => {
+      const user = userEvent.setup();
+      const onSwitchMode = vi.fn();
+      renderModal(
+        <ManualCreatePanel
+          onClose={vi.fn()}
+          onSwitchMode={onSwitchMode}
+          isExpanded={false}
+          setIsExpanded={vi.fn()}
+        />,
+      );
+
+      fireEvent.change(screen.getByPlaceholderText("Issue title"), {
+        target: { value: "Wire the reviewer" },
+      });
+      fireEvent.change(screen.getByPlaceholderText("Add description..."), {
+        target: { value: "Ask [@code-review](mention://skill/skill-1) to check this" },
+      });
+
+      await user.click(screen.getByRole("button", { name: /Switch to Agent/i }));
+
+      expect(onSwitchMode).toHaveBeenCalledTimes(1);
+      expect(mockSetAgent).toHaveBeenCalledWith({
+        prompt: "Wire the reviewer\n\nAsk @code-review to check this",
+      });
+    });
+
+    it("keeps member and agent mention chips live in the mode-switch seed", async () => {
+      const user = userEvent.setup();
+      renderModal(
+        <ManualCreatePanel
+          onClose={vi.fn()}
+          onSwitchMode={vi.fn()}
+          isExpanded={false}
+          setIsExpanded={vi.fn()}
+        />,
+      );
+
+      fireEvent.change(screen.getByPlaceholderText("Issue title"), {
+        target: { value: "Hand off" },
+      });
+      fireEvent.change(screen.getByPlaceholderText("Add description..."), {
+        target: {
+          value:
+            "Loop in [@Alice](mention://member/user-9) and run [@code-review](mention://skill/skill-1)",
+        },
+      });
+
+      await user.click(screen.getByRole("button", { name: /Switch to Agent/i }));
+
+      expect(mockSetAgent).toHaveBeenCalledWith({
+        prompt: "Hand off\n\nLoop in [@Alice](mention://member/user-9) and run @code-review",
+      });
+    });
   });
 
   // Reporter scenario: backend rejects same-titled create with a 409 +

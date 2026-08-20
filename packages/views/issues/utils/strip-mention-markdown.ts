@@ -19,3 +19,26 @@ export function stripMentionMarkdown(text: string): string {
     },
   );
 }
+
+/**
+ * Strip ONLY skill mention markdown to plain text, leaving every other
+ * mention type as a live chip: `[@code-review](mention://skill/id)` →
+ * `@code-review` while `[@Alice](mention://member/id)` stays untouched.
+ *
+ * Used where skill designation has no business meaning but other mentions
+ * still do — the manual→agent mode switch seeds the agent prompt from the
+ * description, and the agent-mode panel suppresses skill items in its `@`
+ * menu (KD5), so a skill chip must not cross the switch as a dead affordance.
+ *
+ * The regex mirrors stripMentionMarkdown with the mention type pinned to
+ * `skill`.
+ */
+export function stripSkillMentionMarkdown(text: string): string {
+  return text.replace(
+    /(?<![\\])\[(@?)((?:\\.|[^\]])+)\]\(mention:\/\/skill\/[^)]+\)/g,
+    (_, prefix: string, rawLabel: string) => {
+      const label = rawLabel.replace(/\\\[/g, "[").replace(/\\\]/g, "]");
+      return `${prefix}${label}`;
+    },
+  );
+}

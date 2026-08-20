@@ -207,6 +207,14 @@ interface ContentEditorBaseProps {
    * prompts) but *preserving* an existing one still matters.
    */
   disableMentions?: boolean;
+  /**
+   * When true, the `@` menu's skill rows are suppressed while every other
+   * mention type keeps its normal behavior. Skill mention NODES stay in the
+   * schema so a chip pasted in from another editor still renders — only the
+   * picker's skill rows go away. Use for editors where skill designation
+   * has no business meaning (KD5: the agent-mode prompt panel).
+   */
+  disableSkillItems?: boolean;
   /** Chat can surface current/recent issue/project suggestions. Other editors use default mention behavior. */
   mentionMode?: "default" | "context";
   mentionContextItems?: MentionItem[];
@@ -397,6 +405,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       showBubbleMenu = true,
       currentIssueId,
       disableMentions = false,
+      disableSkillItems = false,
       mentionMode = "default",
       mentionContextItems,
       enableSlashCommands = false,
@@ -637,6 +646,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
         onUploadFileRef,
         pasteAsFileThresholdRef,
         disableMentions,
+        disableSkillItems,
         mentionMode,
         getMentionContextItems: () => mentionContextItemsRef.current,
         enableSlashCommands,

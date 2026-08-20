@@ -1,6 +1,6 @@
 import { forwardRef, useEffect, useRef, useState, useImperativeHandle } from "react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { Issue, Label, TimelineEntry } from "@multica/core/types";
 import { I18nProvider } from "@multica/core/i18n/react";
@@ -20,6 +20,12 @@ const mockViewport = vi.hoisted(() => ({ isMobile: false }));
 // Counts MockContentEditor mounts. This pins the description to exactly one
 // eager editor per issue and catches stale editor reuse across issue switches.
 const contentEditorMounts = vi.hoisted(() => ({ count: 0 }));
+// Bindable-agent fixture for useSkillMentionAutoOpen (U4): the description
+// editor's typed-insert auto-open gate reads the agent list query. Default
+// empty preserves pre-U4 behavior; the designation-context suite overrides it.
+const mockAgentsData = vi.hoisted(() => ({
+  value: [] as Array<{ id: string; name: string; archived_at: string | null }>,
+}));
 // Stable empty-attachments reference: the real store returns a shared constant
 // so the `useCommentDraftStore(s => s.getAttachments(key))` selector keeps a
 // stable identity. A fresh `[]` per call would loop useSyncExternalStore.
@@ -78,7 +84,7 @@ vi.mock("@multica/core/workspace/queries", () => ({
   }),
   agentListOptions: () => ({
     queryKey: ["workspaces", "ws-1", "agents"],
-    queryFn: () => Promise.resolve([]),
+    queryFn: () => Promise.resolve(mockAgentsData.value),
   }),
   squadListOptions: () => ({
     queryKey: ["workspaces", "ws-1", "squads"],
@@ -175,6 +181,8 @@ vi.mock("../../editor", async () => ({
       placeholder,
       flushPendingOnUnmount,
       onReady,
+      skillMentionContext,
+      onSkillMentionInserted,
     }: any,
     ref: any,
   ) {
@@ -182,6 +190,10 @@ vi.mock("../../editor", async () => ({
     const valueRef = useRef(initialValue);
     const baseRef = useRef(initialValue);
     const [editorValue, setEditorValue] = useState(initialValue);
+    // Mirrors the real editor's skill-mention nodes: a menu insert puts the
+    // chip in the document, so getSkillMentionIds answers it (the auto-open
+    // in-flight tail drops held requests for chips that are no longer present).
+    const skillMentionIdsRef = useRef<string[]>([]);
     useEffect(() => {
       contentEditorMounts.count += 1;
       onReady?.();
@@ -195,7 +207,12 @@ vi.mock("../../editor", async () => ({
     }, [syncedValue]);
     useImperativeHandle(ref, () => ({
       getMarkdown: () => valueRef.current,
-      clearContent: () => { valueRef.current = ""; setEditorValue(""); },
+      getSkillMentionIds: () => skillMentionIdsRef.current,
+      clearContent: () => {
+        valueRef.current = "";
+        skillMentionIdsRef.current = [];
+        setEditorValue("");
+      },
       focus: () => {},
       focusAtCoords: () => {},
       // The top-level composer blurs after a posted comment (afterAccepted).
@@ -210,17 +227,51 @@ vi.mock("../../editor", async () => ({
       uploadFile: () => {},
     }));
     return (
-      <textarea
-        value={editorValue}
-        onChange={(e) => {
-          valueRef.current = e.target.value;
-          setEditorValue(e.target.value);
-          onUpdate?.(e.target.value, baseRef.current);
-        }}
-        placeholder={placeholder}
-        data-testid="rich-text-editor"
-        data-flush-on-unmount={flushPendingOnUnmount ? "true" : undefined}
-      />
+      <>
+        <textarea
+          value={editorValue}
+          onChange={(e) => {
+            valueRef.current = e.target.value;
+            setEditorValue(e.target.value);
+            onUpdate?.(e.target.value, baseRef.current);
+          }}
+          placeholder={placeholder}
+          data-testid="rich-text-editor"
+          data-flush-on-unmount={flushPendingOnUnmount ? "true" : undefined}
+        />
+        {skillMentionContext && (
+          <div data-testid="desc-skill-panel">
+            <span data-testid="desc-skill-popover-open-for">
+              {skillMentionContext.openPopoverFor ?? ""}
+            </span>
+            {/* The composer-held designation map, so user gestures can be
+                asserted without the popover itself. */}
+            <span data-testid="desc-skill-designations">
+              {JSON.stringify(skillMentionContext.skillMentionAgents)}
+            </span>
+            {/* Typed @-menu selection: the suggestion command inserted the
+                chip and notified the composer. */}
+            <button
+              type="button"
+              data-testid="desc-menu-insert-skill"
+              onClick={() => {
+                skillMentionIdsRef.current = ["skill-1"];
+                onSkillMentionInserted?.("skill-1");
+              }}
+            >
+              Insert skill via menu
+            </button>
+            {/* Manual gesture: an agent picked in the chip's popover. */}
+            <button
+              type="button"
+              data-testid="desc-designate-agent"
+              onClick={() => skillMentionContext.onSkillMentionChange("skill-1", ["agent-1"])}
+            >
+              Designate agent-1
+            </button>
+          </div>
+        )}
+      </>
     );
   }),
   TitleEditor: forwardRef(function MockTitleEditor(
@@ -669,6 +720,9 @@ describe("IssueDetail (shared)", () => {
     // Reset project mock — individual tests override per case. Default fixture
     // has project_id: null so getProject is not invoked.
     mockApiObj.getProject.mockReset();
+    // Default: no bindable agents — the auto-open gate stays closed, matching
+    // the pre-U4 suite assumptions. The designation-context suite overrides.
+    mockAgentsData.value = [];
   });
 
   it("shows loading skeleton while data is loading", () => {
@@ -679,6 +733,63 @@ describe("IssueDetail (shared)", () => {
     expect(
       screen.getAllByRole("generic").some((el) => el.getAttribute("data-slot") === "skeleton"),
     ).toBe(true);
+  });
+
+  // U4: the edit-state description editor carries the skill-mention
+  // designation context (the comment-composer pattern), so typed skill chips
+  // register with the composer and the manual chip gesture writes the
+  // composer-held designation map.
+  describe("description skill mention designation context (U4)", () => {
+    beforeEach(() => {
+      mockAgentsData.value = [{ id: "agent-1", name: "Claude Agent", archived_at: null }];
+    });
+
+    it("exposes the designation context on the description editor and registers a typed skill chip", async () => {
+      renderIssueDetail();
+      await screen.findByText("Implement authentication");
+      // The context probe only renders once the description editor mounted
+      // with skillMentionContext wired.
+      await screen.findByTestId("desc-skill-panel");
+
+      fireEvent.click(screen.getByTestId("desc-menu-insert-skill"));
+
+      // The typed-insert signal registers the chip in the composer's single
+      // popover slot (gated on the bindable-agent list settling non-empty).
+      await waitFor(() => {
+        expect(screen.getByTestId("desc-skill-popover-open-for")).toHaveTextContent("skill-1");
+      });
+    });
+
+    it("writes the composer-held designation map on the manual chip gesture", async () => {
+      renderIssueDetail();
+      await screen.findByText("Implement authentication");
+      await screen.findByTestId("desc-skill-panel");
+
+      fireEvent.click(screen.getByTestId("desc-designate-agent"));
+
+      await waitFor(() => {
+        expect(screen.getByTestId("desc-skill-designations")).toHaveTextContent(
+          '{"skill-1":["agent-1"]}',
+        );
+      });
+    });
+
+    it("never auto-opens the picker when the workspace has no bindable agents", async () => {
+      mockAgentsData.value = [];
+      renderIssueDetail();
+      await screen.findByText("Implement authentication");
+      await screen.findByTestId("desc-skill-panel");
+
+      fireEvent.click(screen.getByTestId("desc-menu-insert-skill"));
+
+      // Flush the agent-list settle + the in-flight tail effect; the slot must
+      // stay empty (R1: no bindable agent → no auto-open, the manual chip
+      // gesture remains the only way in).
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+      expect(screen.getByTestId("desc-skill-popover-open-for")).toHaveTextContent("");
+    });
   });
 
   it("gives the skeleton the same horizontal gutters as the loaded column", async () => {

@@ -163,6 +163,14 @@ export interface EditorExtensionsOptions {
    * system prompts) but *preserving* an existing one still matters.
    */
   disableMentions?: boolean;
+  /**
+   * When true, the `@` menu's skill rows are suppressed while every other
+   * mention type keeps its normal behavior. Skill mention NODES stay in the
+   * schema so a chip pasted in from another editor still renders — only the
+   * picker's skill rows go away. Use for editors where skill designation
+   * has no business meaning (KD5: the agent-mode prompt panel).
+   */
+  disableSkillItems?: boolean;
   /** Override @ behavior for chat context suggestions. */
   mentionMode?: "default" | "context";
   getMentionContextItems?: () => MentionItem[];
@@ -275,6 +283,7 @@ export function createEditorExtensions(
           ? { suggestion: createMentionSuggestion(options.queryClient, {
               mode: options.mentionMode,
               getContextItems: options.getMentionContextItems,
+              disableSkillItems: options.disableSkillItems,
               // Read through the ref at event time — the extension array is
               // built once at mount, so a directly-captured callback would
               // freeze at whatever closure existed then.

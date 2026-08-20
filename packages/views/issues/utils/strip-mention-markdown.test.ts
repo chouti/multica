@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, it, expect } from "vitest";
-import { stripMentionMarkdown } from "./strip-mention-markdown";
+import { stripMentionMarkdown, stripSkillMentionMarkdown } from "./strip-mention-markdown";
 
 describe("stripMentionMarkdown", () => {
   it("strips simple agent mention", () => {
@@ -59,5 +59,49 @@ describe("stripMentionMarkdown", () => {
 
   it("handles empty string", () => {
     expect(stripMentionMarkdown("")).toBe("");
+  });
+});
+
+describe("stripSkillMentionMarkdown", () => {
+  it("strips a skill mention to plain text", () => {
+    expect(
+      stripSkillMentionMarkdown("[@code-review](mention://skill/de8efbcc-eaa1-4605-a6ac-d50cfa88e447)"),
+    ).toBe("@code-review");
+  });
+
+  it("leaves member and agent mentions as live chips", () => {
+    expect(
+      stripSkillMentionMarkdown(
+        "Ping [@Alice](mention://member/a1) with [@code-review](mention://skill/s1)",
+      ),
+    ).toBe("Ping [@Alice](mention://member/a1) with @code-review");
+  });
+
+  it("leaves issue mentions untouched", () => {
+    expect(
+      stripSkillMentionMarkdown("[MUL-123](mention://issue/some-uuid) needs [@deploy](mention://skill/d1)"),
+    ).toBe("[MUL-123](mention://issue/some-uuid) needs @deploy");
+  });
+
+  it("handles escaped brackets in skill names", () => {
+    expect(
+      stripSkillMentionMarkdown("[@my\\[skill\\]](mention://skill/id-123)"),
+    ).toBe("@my[skill]");
+  });
+
+  it("does NOT strip backslash-escaped skill markup", () => {
+    expect(
+      stripSkillMentionMarkdown("\\[@code-review](mention://skill/id)"),
+    ).toBe("\\[@code-review](mention://skill/id)");
+  });
+
+  it("does NOT touch regular markdown links", () => {
+    expect(
+      stripSkillMentionMarkdown("[docs](https://example.com)"),
+    ).toBe("[docs](https://example.com)");
+  });
+
+  it("handles empty string", () => {
+    expect(stripSkillMentionMarkdown("")).toBe("");
   });
 });

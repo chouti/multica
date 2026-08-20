@@ -72,6 +72,7 @@ import { CommentCard } from "./comment-card";
 import { CommentInput } from "./comment-input";
 import { formatProgressText } from "./child-progress";
 import { CurrentIssueRenderContextProvider } from "../current-issue-render-context";
+import { useSkillMentionAutoOpen } from "../hooks/use-skill-mention-auto-open";
 import { ResolvedThreadBar } from "./resolved-thread-bar";
 import { getShortcut, shortcutMatchesEvent } from "@multica/core/shortcuts";
 import { isImeComposing } from "@multica/core/utils";
@@ -1845,6 +1846,46 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   }, [highlightCommentId, highlightRequestToken, id, writeViewState, items, targetIdx, scrollContainerEl, replyToRoot, expandedResolved, timelineView, toggleResolvedExpand]);
 
   const descEditorRef = useRef<ContentEditorRef>(null);
+  // Skill-mention designation context (U4): the description editor's @skill
+  // chips get the same composer-owned designation state as the comment
+  // composers — the manual chip-click picker works here, and typed skill
+  // insertions register in the composer's single popover slot via the
+  // existing useSkillMentionAutoOpen gate. The recommendation / auto-fill
+  // engine wires on top in U5.
+  const [skillMentionAgents, setSkillMentionAgents] = useState<Record<string, string[]>>({});
+  const [openPopoverFor, setOpenPopoverFor] = useState<string | null>(null);
+  const handleSkillMentionChange = useCallback((skillId: string, agentIds: string[]) => {
+    setSkillMentionAgents((prev) => {
+      const next = { ...prev };
+      if (agentIds.length > 0) next[skillId] = agentIds;
+      else delete next[skillId];
+      return next;
+    });
+  }, []);
+  // Live chip-presence check for the auto-open in-flight tail: a typed
+  // insert whose chip was deleted before the agent list settled must drop
+  // its held auto-open request, mirroring the comment path's KTD3 rule.
+  const isSkillChipPresent = useCallback(
+    (skillId: string) =>
+      (descEditorRef.current?.getSkillMentionIds() ?? []).includes(skillId),
+    [],
+  );
+  const handleSkillMentionInserted = useSkillMentionAutoOpen(
+    wsId,
+    setOpenPopoverFor,
+    isSkillChipPresent,
+  );
+  // Per-issue reset: navigating issue→issue keeps this IssueDetail mounted
+  // (the editor remounts via `key={id}`), so the composer-held designation
+  // map and the popover slot must reset explicitly or issue A's chips would
+  // bleed into issue B's edit session.
+  const prevIssueIdRef = useRef(id);
+  useEffect(() => {
+    if (prevIssueIdRef.current === id) return;
+    prevIssueIdRef.current = id;
+    setSkillMentionAgents({});
+    setOpenPopoverFor(null);
+  }, [id]);
   // Keep the description editor mounted from the start. Unlike the empty
   // composer shells, a long rendered description cannot swap between
   // react-markdown and ProseMirror without small per-block height differences
@@ -2765,6 +2806,14 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               flushPendingOnUnmount
               currentIssueId={id}
               attachments={descEditorAttachments}
+              skillMentionContext={{
+                wsId,
+                skillMentionAgents,
+                onSkillMentionChange: handleSkillMentionChange,
+                openPopoverFor,
+                setOpenPopoverFor,
+              }}
+              onSkillMentionInserted={handleSkillMentionInserted}
             />
 
             <div className="flex items-center gap-1 mt-3">

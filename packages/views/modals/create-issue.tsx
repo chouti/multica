@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect, useLayoutEffect } from "react";
+import { useState, useRef, useEffect, useLayoutEffect, useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { AppLink, resolveClickIntent, useNavigation } from "../navigation";
 import {
@@ -63,6 +63,8 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { useIssueDraftStore, type IssueCreateDraft } from "@multica/core/issues/stores/draft-store";
 import { useCreateModeStore } from "@multica/core/issues/stores/create-mode-store";
 import { useQuickCreateStore } from "@multica/core/issues/stores/quick-create-store";
+import { stripSkillMentionMarkdown } from "../issues/utils/strip-mention-markdown";
+import { useSkillMentionAutoOpen } from "../issues/hooks/use-skill-mention-auto-open";
 import {
   useIssueCreateSettingsStore,
   type ManualCreateField,
@@ -230,6 +232,22 @@ export function ManualCreatePanel({
   const [formResetKey, setFormResetKey] = useState(0);
   const titleEditorRef = useRef<TitleEditorRef>(null);
   const descEditorRef = useRef<ContentEditorRef>(null);
+  // Skill-mention designation context (U4): the description editor's @skill
+  // chips get the same composer-owned designation state as the comment
+  // composers — the manual chip-click picker works here, and typed skill
+  // insertions register in the composer's single popover slot via the
+  // existing useSkillMentionAutoOpen gate. The recommendation / auto-fill
+  // engine wires on top in U5.
+  const [skillMentionAgents, setSkillMentionAgents] = useState<Record<string, string[]>>({});
+  const [openPopoverFor, setOpenPopoverFor] = useState<string | null>(null);
+  const handleSkillMentionChange = useCallback((skillId: string, agentIds: string[]) => {
+    setSkillMentionAgents((prev) => {
+      const next = { ...prev };
+      if (agentIds.length > 0) next[skillId] = agentIds;
+      else delete next[skillId];
+      return next;
+    });
+  }, []);
   const { isDragOver: descDragOver, dropZoneProps: descDropZoneProps } = useFileDropZone({
     onDrop: (files) => files.forEach((f) => descEditorRef.current?.uploadFile(f)),
   });
@@ -307,6 +325,21 @@ export function ManualCreatePanel({
     ...childIssuesOptions(wsId, parentIssueId ?? ""),
     enabled: !!parentIssueId,
   });
+
+  // Skill-mention auto-open gate (U4, after wsId): a typed insert whose
+  // chip was deleted before the agent list settled must drop its held
+  // auto-open request, mirroring the comment path's KTD3 rule. The
+  // recommendation / auto-fill engine wires on top in U5.
+  const isSkillChipPresent = useCallback(
+    (skillId: string) =>
+      (descEditorRef.current?.getSkillMentionIds() ?? []).includes(skillId),
+    [],
+  );
+  const handleSkillMentionInserted = useSkillMentionAutoOpen(
+    wsId,
+    setOpenPopoverFor,
+    isSkillChipPresent,
+  );
 
   // Set the persisted draft's active mode so a later reopen (and any reader of
   // the unified draft) knows which form the user is editing in.
@@ -401,6 +434,11 @@ export function ManualCreatePanel({
     setParentIssueId(undefined);
     setStage(null);
     setChildIssues([]);
+    // Drop the description editor's per-issue designation state so the next
+    // issue starts on a clean slate; the editor's clearContent below wipes
+    // the chips too, but the map would linger without this.
+    setSkillMentionAgents({});
+    setOpenPopoverFor(null);
     // Keep the just-used assignee for the next issue in the batch; reset
     // everything else across the manual + shared slots.
     setManual({
@@ -715,7 +753,15 @@ export function ManualCreatePanel({
     setShared({ projectId, priority, dueDate });
     const existingPrompt = draft.agent.prompt;
     if (!existingPrompt.trim()) {
-      const desc = descEditorRef.current?.getMarkdown()?.trim() ?? "";
+      // KD5: the agent-mode panel has no skill designation (its @ menu
+      // suppresses skill rows), so the manual description's skill chips
+      // must cross the switch as plain text — the dead affordance must
+      // not reach the agent prompt. Other mention types stay as live chips
+      // since the agent panel still surfaces them.
+      const desc =
+        stripSkillMentionMarkdown(
+          descEditorRef.current?.getMarkdown()?.trim() ?? "",
+        );
       const seeded = [title.trim(), desc].filter(Boolean).join("\n\n");
       if (seeded) setAgent({ prompt: seeded });
     }
@@ -871,6 +917,14 @@ export function ManualCreatePanel({
                 onUploadingChange={uploadGate.onUploadingChange}
                 debounceMs={500}
                 attachments={draftAttachments}
+                skillMentionContext={{
+                  wsId,
+                  skillMentionAgents,
+                  onSkillMentionChange: handleSkillMentionChange,
+                  openPopoverFor,
+                  setOpenPopoverFor,
+                }}
+                onSkillMentionInserted={handleSkillMentionInserted}
               />
               {descDragOver && <FileDropOverlay />}
             </div>
