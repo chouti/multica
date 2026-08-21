@@ -995,7 +995,7 @@ export class ApiClient {
       endpoint: "POST /api/issues",
     });
     if (!issue) {
-      throw new Error();
+      throw new Error("POST /api/issues returned a malformed issue");
     }
     return issue;
   }
@@ -1058,7 +1058,7 @@ export class ApiClient {
       endpoint: "PUT /api/issues/:id",
     });
     if (!issue) {
-      throw new Error();
+      throw new Error("PUT /api/issues/:id returned a malformed issue");
     }
     return issue;
   }

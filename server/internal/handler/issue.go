@@ -3234,6 +3234,35 @@ func (h *Handler) applyCreateIssueSkillDesignations(ctx context.Context, issue d
 		}
 	}
 
+	// Per-agent skill IDs (for the handoff note). Same walk as the distinct-
+	// agent list above; the first-seen ordering keeps the note's label order
+	// stable across runs.
+	skillIDsByAgent := make(map[string][]pgtype.UUID)
+	for skillID, agents := range designations {
+		for _, agentID := range agents {
+			key := uuidToString(agentID)
+			skillIDsByAgent[key] = append(skillIDsByAgent[key], skillID)
+		}
+	}
+	// skillNameByID is populated once across all designated agents (mirrors
+	// the edit path) so the handoff note never issues one GetSkillInWorkspace
+	// per (skill, agent) pair when several agents share a skill.
+	skillNameByID := make(map[pgtype.UUID]string)
+	for skillID := range designations {
+		if !skillID.Valid {
+			continue
+		}
+		if _, ok := skillNameByID[skillID]; ok {
+			continue
+		}
+		if s, err := h.Queries.GetSkillInWorkspace(ctx, db.GetSkillInWorkspaceParams{
+			ID:          skillID,
+			WorkspaceID: issue.WorkspaceID,
+		}); err == nil {
+			skillNameByID[skillID] = s.Name
+		}
+	}
+
 	isBacklog := issuestatus.Effective(ctx, h.Queries, issue.WorkspaceID, issue.Status) == "backlog"
 
 	for _, key := range order {
@@ -3266,7 +3295,12 @@ func (h *Handler) applyCreateIssueSkillDesignations(ctx context.Context, issue d
 			merged()
 			continue
 		}
-		if _, err := h.TaskService.EnqueueTaskForMentionWithActor(ctx, issue, agentID, "", memberActorUserID(actorType, actorID)); err != nil {
+		// Handoff note (review D1): mirrors the edit path so the create-path
+		// agent learns it was designated via `@skill` — not silently enqueued.
+		// The note text names the create gesture ("creating the issue
+		// description"), distinct from the edit path's "editing".
+		note := h.issueSkillDesignationHandoffNoteFor(ctx, issue, actorType, actorID, skillIDsByAgent[key], skillNameByID, "creating")
+		if _, err := h.TaskService.EnqueueTaskForMentionWithActor(ctx, issue, agentID, note, memberActorUserID(actorType, actorID)); err != nil {
 			// A sibling task won the insert race between the pending check and
 			// the enqueue: the agent is covered — merged, never an error.
 			if errors.Is(err, service.ErrDuplicatePendingTask) {
@@ -3463,6 +3497,14 @@ func (h *Handler) applyUpdateIssueSkillDesignations(ctx context.Context, issue d
 // agents (a max-sized request can fan out the same skill id across many
 // agents).
 func (h *Handler) issueSkillDesignationHandoffNote(ctx context.Context, issue db.Issue, actorType, actorID string, skillIDs []pgtype.UUID, skillNameByID map[pgtype.UUID]string) string {
+	return h.issueSkillDesignationHandoffNoteFor(ctx, issue, actorType, actorID, skillIDs, skillNameByID, "editing")
+}
+
+// issueSkillDesignationHandoffNoteFor is the gesture-parameterized core of the
+// KTD7 note. `gesture` is the verb describing when the designation happened:
+// "editing" (edit path) or "creating" (create path, review D1 — the create-path
+// agent receives the same designation summary the edit path already carries).
+func (h *Handler) issueSkillDesignationHandoffNoteFor(ctx context.Context, issue db.Issue, actorType, actorID string, skillIDs []pgtype.UUID, skillNameByID map[pgtype.UUID]string, gesture string) string {
 	actorName := "Someone"
 	if id, err := util.ParseUUID(actorID); err == nil {
 		switch actorType {
@@ -3492,7 +3534,7 @@ func (h *Handler) issueSkillDesignationHandoffNote(ctx context.Context, issue db
 	if len(labels) > 1 {
 		noun = "skills"
 	}
-	return fmt.Sprintf("%s designated you to apply the %s %s while editing the issue description.", actorName, strings.Join(labels, ", "), noun)
+	return fmt.Sprintf("%s designated you to apply the %s %s while %s the issue description.", actorName, strings.Join(labels, ", "), noun, gesture)
 }
 
 type UpdateIssueRequest struct {

@@ -404,3 +404,46 @@ describe("issue draft store — logout cleanup", () => {
     expect(localStorage.getItem("multica_issue_draft:acme")).toBeNull();
   });
 });
+
+describe("issue draft store — skillMention guards persist across reopens (KTD8)", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    useIssueDraftStore.setState(RESET_STATE);
+  });
+
+  it("persists skillMentionTouched + skillMentionFilled through a workspace remount", async () => {
+    setCurrentWorkspace("delta", "ws_d");
+    await flush();
+    await flush();
+
+    // The composer marks chips touched / filled as the user interacts.
+    const { setManual } = useIssueDraftStore.getState();
+    setManual({
+      skillMentionTouched: ["skill-aaa", "skill-bbb"],
+      skillMentionFilled: ["skill-aaa"],
+    });
+    await flush();
+
+    // Storage holds the guards alongside the rest of the manual draft.
+    const persisted = localStorage.getItem("multica_issue_draft:delta");
+    expect(persisted).not.toBeNull();
+    const parsed = JSON.parse(persisted!);
+    expect(parsed.state.draft.manual.skillMentionTouched).toEqual([
+      "skill-aaa",
+      "skill-bbb",
+    ]);
+    expect(parsed.state.draft.manual.skillMentionFilled).toEqual(["skill-aaa"]);
+
+    // Force a rehydrate: setCurrentWorkspace triggers the registered
+    // rehydrate fn, which re-reads storage through the workspace-aware
+    // adapter. Directly invoking the store's rehydrate path is the canonical
+    // way to verify the merge path — no need to simulate unmount.
+    useIssueDraftStore.persist.rehydrate();
+    await flush();
+    await flush();
+
+    const { draft } = useIssueDraftStore.getState();
+    expect(draft.manual.skillMentionTouched).toEqual(["skill-aaa", "skill-bbb"]);
+    expect(draft.manual.skillMentionFilled).toEqual(["skill-aaa"]);
+  });
+});
