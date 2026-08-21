@@ -196,7 +196,10 @@ export function useRecommendedSkillAgent({
 
   // Highest-priority mention_agent / mention_squad_leader from the
   // description body. The composer filters to this-session mentions per R2;
-  // the hook ranks whatever survives.
+  // the hook ranks whatever survives. Squad mentions resolve to their leader
+  // here — the form-assignee branch's `resolveFromSource` already mirrors
+  // this for assignee types, and R2 calls out `@squad` as a valid
+  // recommendation source.
   const descriptionAgentId = useMemo(() => {
     if (!descriptionMentions || descriptionMentions.length === 0) return null;
     const seen = new Set<string>();
@@ -206,15 +209,21 @@ export function useRecommendedSkillAgent({
       if (seen.has(mention.id)) continue;
       seen.add(mention.id);
       if (suppressedAgentIds?.has(mention.id)) continue;
-      if (!eligibleAgentIds.has(mention.id)) continue;
+      const candidateId =
+        mention.source === "mention_squad_leader"
+          ? (squadById.get(mention.id)?.leader_id ?? null)
+          : mention.id;
+      if (!candidateId) continue;
+      if (suppressedAgentIds?.has(candidateId)) continue;
+      if (!eligibleAgentIds.has(candidateId)) continue;
       const tier = skillMentionSourcePriority(mention.source);
       if (bestId === null || tier < bestTier) {
-        bestId = mention.id;
+        bestId = candidateId;
         bestTier = tier;
       }
     }
     return bestId;
-  }, [descriptionMentions, suppressedAgentIds, eligibleAgentIds]);
+  }, [descriptionMentions, suppressedAgentIds, eligibleAgentIds, squadById]);
 
   const suppressed = suppressedAgentIds ?? EMPTY_SUPPRESSED;
 

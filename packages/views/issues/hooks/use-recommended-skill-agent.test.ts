@@ -363,6 +363,44 @@ describe("useRecommendedSkillAgent", () => {
       });
     });
 
+    it("resolves a mention_squad_leader mention to the squad leader (R2)", async () => {
+      // R2 names `@squad` as a recommendation source; the description path
+      // parses it as a squad id, so the hook must resolve the squad id to
+      // the leader before checking `eligibleAgentIds` — otherwise the
+      // mention is silently dropped from recommendation.
+      listSquads.mockResolvedValue([
+        {
+          id: "squad-1",
+          workspace_id: "ws-1",
+          name: "Reviewers",
+          description: "",
+          instructions: "",
+          avatar_url: null,
+          leader_id: mentionedAgentId,
+          creator_id: "user-1",
+          created_at: "2026-01-01T00:00:00Z",
+          updated_at: "2026-01-01T00:00:00Z",
+          archived_at: null,
+          archived_by: null,
+        },
+      ] as any);
+
+      const { result } = renderRecommended({
+        issueId: "issue-1",
+        descriptionMentions: [
+          { id: "squad-1", source: "mention_squad_leader" },
+        ],
+      });
+
+      await vi.waitFor(() => {
+        expect(result.current).toEqual({
+          id: mentionedAgentId,
+          tier: 0,
+          from: "fast-path",
+        });
+      });
+    });
+
     it("skips description mentions that fail the visibility check", async () => {
       // The archived agent is in descriptionMentions but not in
       // eligibleAgentIds (unarchived + runtime-bound) — the recommendation
