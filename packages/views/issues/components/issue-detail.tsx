@@ -54,6 +54,7 @@ import { PropRow } from "../../common/prop-row";
 import { PropertyIcon } from "../../common/property-icon";
 import type { Attachment, Issue, IssueProperty, IssueStatus, IssuePriority, TimelineEntry, UpdateIssueRequest } from "@multica/core/types";
 import { contentReferencesAttachment } from "@multica/core/types";
+import { parseMentions } from "@multica/core/issues/comment-trigger-outcomes";
 import { STATUS_CONFIG, PRIORITY_CONFIG, isClosedStatus } from "@multica/core/issues/config";
 import { formatDateOnly, isPastDateOnly } from "@multica/core/issues/date";
 import { useUpdateIssue } from "@multica/core/issues/mutations";
@@ -1941,7 +1942,30 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     if (prev !== null && openPopoverFor === null && Object.keys(skillMentionAgents).length > 0) {
       designationSubmit.submit({ source: "user-typing" });
     }
-  }, [openPopoverFor, skillMentionAgents, designationSubmit]);
+    // R14 — popover just closed AND there's a chip in the document with no
+    // agent picked. Present the unresolved hint as a non-blocking toast;
+    // presenting it satisfies the "not silent" contract without holding the
+    // autosave. If a candidate later fills the chip (KD8 sticky + reverse-
+    // timing fill), the hint is no longer rendered because the designation
+    // map is populated.
+    if (prev !== null && openPopoverFor === null) {
+      const unresolvedLabels: string[] = [];
+      for (const mention of parseMentions(descDraft)) {
+        if (mention.type !== "skill") continue;
+        const agentIds = skillMentionAgents[mention.id];
+        if (agentIds && agentIds.length > 0) continue;
+        unresolvedLabels.push(mention.label);
+      }
+      if (unresolvedLabels.length > 0) {
+        toast.info(
+          tModals(($) => $.skill_designation.unresolved_hint, {
+            count: unresolvedLabels.length,
+            skillName: unresolvedLabels[0] ?? "",
+          }),
+        );
+      }
+    }
+  }, [openPopoverFor, skillMentionAgents, designationSubmit, descDraft, tModals]);
 
   // Keep the description editor mounted from the start. Unlike the empty
   // composer shells, a long rendered description cannot swap between

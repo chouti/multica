@@ -65,7 +65,7 @@ import { useCreateModeStore } from "@multica/core/issues/stores/create-mode-stor
 import { useQuickCreateStore } from "@multica/core/issues/stores/quick-create-store";
 import { stripSkillMentionMarkdown } from "../issues/utils/strip-mention-markdown";
 import { useSkillAutoBind } from "../issues/hooks/use-skill-auto-bind";
-import { mentionLabelsByTarget, parseIssueSkillDesignationOutcomes } from "@multica/core/issues/comment-trigger-outcomes";
+import { mentionLabelsByTarget, parseIssueSkillDesignationOutcomes, parseMentions } from "@multica/core/issues/comment-trigger-outcomes";
 import { surfaceDesignationOutcomes } from "../issues/utils/skill-designation-toasts";
 import {
   useIssueCreateSettingsStore,
@@ -299,6 +299,25 @@ export function ManualCreatePanel({
     }
     return out;
   }, [skillMentionAgents, descriptionMirror, status, getActorName]);
+
+  // R14 — chips in the document with no agent picked (unresolved
+  // designation). Computed from the same parseMentions source the
+  // designation hints use; the unresolved surface lists every `skill`
+  // mention whose id isn't present in `skillMentionAgents` (or is present
+  // with an empty agent list — user explicitly cleared the designation).
+  // Paste / undo / draft-restore chips are intentionally included: R14's
+  // pre-submit reveal band is the "no candidate" fallback, distinct from
+  // the R5 auto-popover exclusion.
+  const unresolvedSkillLabels = useMemo<readonly string[]>(() => {
+    const out: string[] = [];
+    for (const mention of parseMentions(descriptionMirror)) {
+      if (mention.type !== "skill") continue;
+      const agentIds = skillMentionAgents[mention.id];
+      if (agentIds && agentIds.length > 0) continue;
+      out.push(mention.label);
+    }
+    return out;
+  }, [descriptionMirror, skillMentionAgents]);
 
   // Set the persisted draft's active mode so a later reopen (and any reader of
   // the unified draft) knows which form the user is editing in.
@@ -932,6 +951,7 @@ export function ManualCreatePanel({
               assigneeId={assigneeId}
               status={status}
               designations={designationHints}
+              unresolvedSkillLabels={unresolvedSkillLabels}
             />
 
             {/* Property toolbar — each field renders per the Settings → Issue
