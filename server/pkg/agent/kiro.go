@@ -18,6 +18,13 @@ import (
 // tests can shorten it. Mirrors qoderReaderDrainGrace / traecliReaderDrainGrace.
 var kiroReaderDrainGrace = 2 * time.Second
 
+// kiroPanicDetailGrace caps how long a panicked run waits for the runtime to
+// exit after stdin is closed, before the process group is killed. Only the
+// panic path pays it, and only when the runtime refuses to die: a runtime
+// that exits on EOF drains its stderr immediately. A var, not a const, so
+// tests can shorten it.
+var kiroPanicDetailGrace = 2 * time.Second
+
 // kiroBlockedArgs are flags hardcoded by the daemon that must not be
 // overridden by user-configured custom_args. `acp` is the protocol subcommand,
 // and --trust-all-tools covers Kiro's CLI-level tool gate while
@@ -562,6 +569,24 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 
 		duration := time.Since(startTime)
 		b.cfg.Logger.Info("kiro finished", "pid", cmd.Process.Pid, "status", finalStatus, "duration", duration.Round(time.Millisecond).String())
+
+		if runtimePanic.Fired() {
+			// cancel() SIGKILLs the whole process group (newRuntimeCmd), and
+			// the panic header is what triggered the abort — so killing now
+			// can beat the runtime's Message/Location lines onto the floor.
+			// Those lines carry the text taskfailure.UnresumableHistory and
+			// the resume-rejection guards match on; losing them makes an
+			// undrivable session look resumable. Close stdin and give the
+			// runtime a bounded chance to exit on its own so stderr actually
+			// reaches EOF, instead of guessing how long the detail takes.
+			// A runtime that stays alive after panicking (MUL-8188) is still
+			// killed once the grace expires, so fail-fast holds.
+			stdin.Close()
+			select {
+			case <-stderrDone:
+			case <-time.After(kiroPanicDetailGrace):
+			}
+		}
 
 		stdin.Close()
 		cancel()

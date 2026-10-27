@@ -36,8 +36,19 @@ while IFS= read -r line; do
         sleep 0.3
       fi
       printf '\033[31mThe application panicked (crashed).\033[0m\n' >&2
+      # KIRO_PANIC_DETAIL_DELAY separates the header from the detail lines, so
+      # a scheduler that favours the parent over the child is reproducible
+      # without an oversubscribed runner.
+      if [ -n "$KIRO_PANIC_DETAIL_DELAY" ]; then
+        sleep "$KIRO_PANIC_DETAIL_DELAY"
+      fi
       printf 'Message:  first agent loop request should never fail: AgentLoopResponse(Custom("invalid conversation history received"))\n' >&2
       printf 'Location: crates/agent/src/agent/mod.rs:3744\n' >&2
+      if [ -n "$KIRO_PANIC_HANG" ]; then
+        # A runtime that ignores stdin EOF: only the grace-expiry kill can
+        # end the run, which is the MUL-8188 wedged-session shape.
+        while :; do sleep 1; done
+      fi
       if [ -n "$KIRO_PANIC_EXIT" ]; then
         exit 101
       fi
@@ -112,6 +123,68 @@ func TestKiroResumedPanicFailsFastAndRejectsResume(t *testing.T) {
 	}
 	// The resume guards (daemon fresh-session retry, poisoned classifier,
 	// GetLastTaskSession text guard) all key off this predicate.
+	if !taskfailure.UnresumableHistory(result.Error) {
+		t.Errorf("UnresumableHistory(%q) = false, want true", result.Error)
+	}
+}
+
+// TestKiroResumedPanicKeepsDetailWhenParentWinsTheRace is the deterministic
+// form of the CI flake behind TestKiroResumedPanicFailsFastAndRejectsResume:
+// the runtime prints the panic header, then takes a moment to print Message/
+// Location. Aborting the prompt cancels the run context, whose Cancel
+// SIGKILLs the whole process group — so a parent that wins the schedule kills
+// the runtime before those lines exist, and the error loses exactly the text
+// taskfailure.UnresumableHistory and the resume guards key on. The delay
+// stands in for the starved runner (two main-pipeline failures, green on a
+// quiet machine).
+func TestKiroResumedPanicKeepsDetailWhenParentWinsTheRace(t *testing.T) {
+	t.Parallel()
+
+	result, elapsed := runKiroPanicScript(t, map[string]string{"KIRO_PANIC_DETAIL_DELAY": "0.2"}, ExecOptions{ResumeSessionID: "ses_broken"})
+
+	if result.Status != "failed" {
+		t.Fatalf("status = %q, want failed (error=%q)", result.Status, result.Error)
+	}
+	if elapsed > 10*time.Second {
+		t.Fatalf("run took %s; waiting for the panic detail must not resurrect the hang", elapsed)
+	}
+	for _, want := range []string{"The application panicked", "invalid conversation history received", "Location: crates/agent/src/agent/mod.rs:3744"} {
+		if !strings.Contains(result.Error, want) {
+			t.Errorf("error %q does not contain %q", result.Error, want)
+		}
+	}
+	if !result.ResumeRejected {
+		t.Errorf("ResumeRejected = false, want true (error=%q)", result.Error)
+	}
+	if !taskfailure.UnresumableHistory(result.Error) {
+		t.Errorf("UnresumableHistory(%q) = false, want true", result.Error)
+	}
+}
+
+// TestKiroPanicIgnoringStdinStillFailsFast keeps the other half of the
+// contract: a runtime that stays alive after panicking and never reads its
+// stdin again cannot be drained by closing stdin, so the grace expiry has to
+// kill it. The run must still end in seconds (not the MUL-8188 multi-hour
+// hang), and the detail printed before the wedge must survive.
+func TestKiroPanicIgnoringStdinStillFailsFast(t *testing.T) {
+	t.Parallel()
+
+	result, elapsed := runKiroPanicScript(t, map[string]string{"KIRO_PANIC_HANG": "1"}, ExecOptions{ResumeSessionID: "ses_broken"})
+
+	if result.Status != "failed" {
+		t.Fatalf("status = %q, want failed (error=%q)", result.Status, result.Error)
+	}
+	if elapsed > 10*time.Second {
+		t.Fatalf("run took %s; the grace-expiry kill did not end a wedged runtime", elapsed)
+	}
+	if !result.ResumeRejected {
+		t.Errorf("ResumeRejected = false, want true (error=%q)", result.Error)
+	}
+	for _, want := range []string{"invalid conversation history received", "Location: crates/agent/src/agent/mod.rs:3744"} {
+		if !strings.Contains(result.Error, want) {
+			t.Errorf("error %q does not contain %q", result.Error, want)
+		}
+	}
 	if !taskfailure.UnresumableHistory(result.Error) {
 		t.Errorf("UnresumableHistory(%q) = false, want true", result.Error)
 	}
